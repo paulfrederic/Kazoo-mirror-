@@ -73,57 +73,61 @@ constrain_weight(W) when W < 1 -> 1;
 constrain_weight(W) -> W.
 
 -spec lookup_did(ne_binary(), ne_binary()) ->
-                              {'ok', wh_json:object()} |
-                              {'error', 'no_did_found' | atom()}.
+                        {'ok', wh_json:object()} |
+                        {'error', 'no_did_found' | atom()}.
 lookup_did(DID, AcctID) ->
-    Options = [{<<"key">>, DID}],
-    AcctDB = wh_util:format_account_id(AcctID, encoded),
+    Options = [{'key', DID}],
+    AcctDB = wh_util:format_account_id(AcctID, 'encoded'),
 
-    case wh_cache:fetch({lookup_did, DID, AcctID}) of
-        {ok, _}=Resp ->
+    case wh_cache:fetch_local(?TS_CACHE, {'lookup_did', DID, AcctID}) of
+        {'ok', _}=Resp ->
             %% wh_timer:tick("lookup_did/1 cache hit"),
             lager:info("Cache hit for ~s", [DID]),
             Resp;
-        {error, not_found} ->
+        {'error', 'not_found'} ->
             %% wh_timer:tick("lookup_did/1 cache miss"),
             case couch_mgr:get_results(AcctDB, ?TS_VIEW_DIDLOOKUP, Options) of
-                {ok, []} -> lager:info("Cache miss for ~s, no results", [DID]), {error, no_did_found};
-                {ok, [ViewJObj]} ->
-                    lager:info("Cache miss for ~s, found result with id ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
+                {'ok', []} -> {'error', 'no_did_found'};
+                {'ok', [ViewJObj]} ->
+                    lager:info("found result with id ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
                     ValueJObj = wh_json:get_value(<<"value">>, ViewJObj),
                     Resp = wh_json:set_value(<<"id">>, wh_json:get_value(<<"id">>, ViewJObj), ValueJObj),
-                    wh_cache:store({lookup_did, DID, AcctID}, Resp),
-                    {ok, Resp};
-                {ok, [ViewJObj | _Rest]} ->
+                    wh_cache:store_local(?TS_CACHE, {'lookup_did', DID, AcctID}, Resp),
+                    {'ok', Resp};
+                {'ok', [ViewJObj | _Rest]} ->
                     lager:notice("multiple results for did ~s in acct ~s", [DID, AcctID]),
-                    lager:info("Cache miss for ~s, found multiple results, using first with id ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
+                    lager:info("found multiple results, using first with id ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
                     ValueJObj = wh_json:get_value(<<"value">>, ViewJObj),
                     Resp = wh_json:set_value(<<"id">>, wh_json:get_value(<<"id">>, ViewJObj), ValueJObj),
-                    wh_cache:store({lookup_did, DID, AcctID}, Resp),
-                    {ok, Resp};
-                {error, _}=E -> lager:info("Cache miss for ~s, error ~p", [DID, E]), E
+                    wh_cache:store_local(?TS_CACHE, {'lookup_did', DID, AcctID}, Resp),
+                    {'ok', Resp};
+                {'error', _}=E -> lager:info("Cache miss for ~s, error ~p", [DID, E]), E
             end
     end.
 
 -spec lookup_user_flags(ne_binary(), ne_binary(), ne_binary()) ->
-                                     {'ok', wh_json:object()} |
-                                     {'error', atom()}.
+                               {'ok', wh_json:object()} |
+                               {'error', atom()}.
 lookup_user_flags(Name, Realm, AcctID) ->
     %% wh_timer:tick("lookup_user_flags/2"),
-    AcctDB = wh_util:format_account_id(AcctID, encoded),
+    AcctDB = wh_util:format_account_id(AcctID, 'encoded'),
 
-    case wh_cache:fetch({lookup_user_flags, Realm, Name, AcctID}) of
-        {ok, _}=Result -> lager:info("Cache hit for ~s@~s", [Name, Realm]), Result;
-        {error, not_found} ->
-            case couch_mgr:get_results(AcctDB, <<"trunkstore/LookUpUserFlags">>, [{<<"key">>, [Realm, Name]}]) of
-                {error, _}=E -> lager:info("Cache miss for ~s@~s, err: ~p", [Name, Realm, E]), E;
-                {ok, []} -> lager:info("Cache miss for ~s@~s, no results", [Name, Realm]), {error, no_user_flags};
-                {ok, [User|_]} ->
-                    lager:info("Cache miss, found view result for ~s@~s with id ~s", [Name, Realm, wh_json:get_value(<<"id">>, User)]),
+    case wh_cache:fetch_local(?TS_CACHE, {'lookup_user_flags', Realm, Name, AcctID}) of
+        {'ok', _}=Result -> lager:info("Cache hit for ~s@~s", [Name, Realm]), Result;
+        {'error', 'not_found'} ->
+            case couch_mgr:get_results(AcctDB, <<"trunkstore/LookUpUserFlags">>, [{'key', [Realm, Name]}]) of
+                {'error', _}=E ->
+                    lager:info("Cache miss for ~s@~s, err: ~p", [Name, Realm, E]),
+                    E;
+                {'ok', []} ->
+                    lager:info("Cache miss for ~s@~s, no results", [Name, Realm]),
+                    {'error', 'no_user_flags'};
+                {'ok', [User|_]} ->
+                    lager:info("found view result for ~s@~s with id ~s", [Name, Realm, wh_json:get_value(<<"id">>, User)]),
                     ValJObj = wh_json:get_value(<<"value">>, User),
                     JObj = wh_json:set_value(<<"id">>, wh_json:get_value(<<"id">>, User), ValJObj),
-                    wh_cache:store({lookup_user_flags, Realm, Name, AcctID}, JObj),
-                    {ok, JObj}
+                    wh_cache:store_local(?TS_CACHE, {'lookup_user_flags', Realm, Name, AcctID}, JObj),
+                    {'ok', JObj}
             end
     end.
 
@@ -147,18 +151,18 @@ invite_format(<<"npan">>, To) ->
 invite_format(_, _) ->
     [{<<"Invite-Format">>, <<"username">>} ].
 
--spec caller_id(['undefined' | wh_json:object(),...] | []) -> {api_binary(), api_binary()}.
+-spec caller_id(api_objects()) -> {api_binary(), api_binary()}.
 caller_id([]) ->
-    {undefined, undefined};
-caller_id([undefined|T]) ->
+    {'undefined', 'undefined'};
+caller_id(['undefined'|T]) ->
     caller_id(T);
 caller_id([CID|T]) ->
     case {wh_json:get_value(<<"cid_name">>, CID), wh_json:get_value(<<"cid_number">>, CID)} of
-        {undefined, undefined} -> caller_id(T);
+        {'undefined', 'undefined'} -> caller_id(T);
         CallerID -> CallerID
     end.
 
--spec sip_headers(['undefined' | wh_json:object(),...] | []) -> 'undefined' | wh_json:object().
+-spec sip_headers(['undefined' | wh_json:object(),...] | []) -> api_object().
 sip_headers([]) -> undefined;
 sip_headers(L) when is_list(L) ->
     case [ Headers || Headers <- L, wh_json:is_json_object(Headers)] of
@@ -166,7 +170,7 @@ sip_headers(L) when is_list(L) ->
         _ -> undefined
     end.
 
--spec failover([wh_json:object() | api_binary(),...]) -> wh_json:object() | 'undefined'.
+-spec failover([wh_json:object() | api_binary(),...]) -> api_object().
 %% cascade from DID to Srv to Acct
 failover(L) ->
     case simple_extract(L) of
