@@ -6,13 +6,7 @@
 -include_lib("whistle/include/wh_databases.hrl").
 
 -define(APP_NAME, <<"trunkstore">>).
--define(APP_VERSION, <<"0.9.0">>).
-
-%% couch params for the trunk store and its views
--define(TS_DB, <<"ts">>).
-
-%% cdr doc store
--define(TS_CDR_PREFIX, <<"ts_cdr">>).
+-define(APP_VERSION, <<"1.0.0">>).
 
 %% Account views
 -define(TS_VIEW_DIDLOOKUP, <<"trunkstore/LookUpDID">>).
@@ -23,11 +17,12 @@
 
 -define(TS_VIEW_CARRIERIP, <<"LookUpCarrierIP/LookUpCarrierIP">>).
 
+-define(TS_CACHE, 'trunkstore_cache').
+
 -define(EOD, 'end_of_day').
 -define(MILLISECS_PER_DAY, 1000 * 60 * 60 * 24).
 
 %% couch params for the routing table and its views
--define(TS_RATES_DB, <<"ts_rates">>).
 -define(TS_CARRIERS_DOC, <<"carriers">>).
 
 -define(DEFAULT_PROGRESS_TIMEOUT, 6). % seconds to timeout if no progress
@@ -35,8 +30,7 @@
 -define(INBOUND_FORMATS, [<<"E.164">>, <<"NPANXXXXXX">>, <<"1NPANXXXXXX">>, <<"e164">>, <<"npan">>, <<"1npan">>]).
 
 % just want to deal with binary K/V pairs
-%%-type proplist() :: list(tuple(binary(), binary())) | [].
--type active_calls() :: list(tuple(binary(), flat_rate | per_min)) | [].
+-type active_calls() :: [{binary(), 'flat_rate' | 'per_min'},...] | [].
 
 -record(ts_callflow_state, {
           aleg_callid = <<>> :: binary()
@@ -62,13 +56,13 @@
           ,direction = <<>> :: binary()                  % what direction is the call (relative to client)
           ,server_id = <<>> :: binary()                  % Server of the DID
           ,failover = {} :: tuple()                      % Failover information {type, value}. Type=(sip|e164), Value=("sip:user@domain"|"+1234567890")
-          ,allow_payphone = false :: boolean()
+          ,allow_payphone = 'false' :: boolean()
           ,caller_id = {} :: tuple()                     % Name and Number for Caller ID - check DID, then server, then account, then what we got from ecallmgr
           ,caller_id_e911 = {} :: tuple()                % CallerID for E911 calls - Check DID, then server, then account
           ,inbound_format = <<>> :: binary()             % how does the server want the number? "E.164" | "NPANXXXXXX" | "1NPANXXXXXX" | "USERNAME"
           ,media_handling = <<>> :: binary()             % are we in the media path or not "process" | "bypass"
-          ,progress_timeout = none :: none | integer()   %% for inbound with failover, how long do we wait
-          ,force_outbound = undefined :: undefined | boolean() %% if true, and call is outbound, don't try to route through our network; force over a carrier
+          ,progress_timeout = 'none' :: 'none' | integer()   %% for inbound with failover, how long do we wait
+          ,force_outbound :: 'undefined' | boolean() %% if true, and call is outbound, don't try to route through our network; force over a carrier
           ,codecs = [] :: list()                         % what codecs to use (t38, g729, g711, etc...)
           ,rate = 0.0 :: float()                 % rate for the inbound leg, per minute
           ,rate_increment = 60 :: integer()      % time, in sec, to bill per
@@ -76,11 +70,11 @@
           ,surcharge = 0.0 :: float()            % rate to charge up front
           ,rate_name = <<>> :: binary()          % name of the rate
           ,route_options = [] :: list()                  % options required to be handled by carriers
-          ,flat_rate_enabled = true :: boolean()
+          ,flat_rate_enabled = 'true' :: boolean()
           ,account_doc_id = <<>> :: binary()             % doc id of the account
           ,diverted_account_doc_id = <<>> :: binary()    % if an outbound call routes to a known DID, route internally rather than over a carrier; for billing
           ,routes_generated = wh_json:new() :: wh_json:object() | wh_json:objects()           % the routes generated during the routing phase
-          ,scenario = inbound :: inbound | outbound | inbound_failover | outbound_inbound | outbound_inbound_failover % what scenario have we routed over
+          ,scenario = 'inbound' :: 'inbound' | 'outbound' | 'inbound_failover' | 'outbound_inbound' | 'outbound_inbound_failover' % what scenario have we routed over
          }).
 
 
