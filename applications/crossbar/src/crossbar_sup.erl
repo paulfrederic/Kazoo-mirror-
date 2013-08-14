@@ -19,7 +19,7 @@
 
 -include("crossbar.hrl").
 
--define(CACHE(), {?CROSSBAR_CACHE, {'wh_cache', 'start_link', [?CROSSBAR_CACHE]}, 'permanent', 5000, 'worker', ['wh_cache']}).
+-define(CACHE, {?CROSSBAR_CACHE, {'wh_cache', 'start_link', [?CROSSBAR_CACHE]}, 'permanent', 5000, 'worker', ['wh_cache']}).
 
 -define(DISPATCH_FILE, [code:lib_dir('crossbar', 'priv'), "/dispatch.conf"]).
 -define(DEFAULT_LOG_DIR, wh_util:to_binary(code:lib_dir('crossbar', 'log'))).
@@ -81,7 +81,7 @@ upgrade() ->
 %%--------------------------------------------------------------------
 -spec init([]) -> sup_init_ret().
 init([]) ->
-    {'ok', {{'one_for_one', 10, 10}, [?CACHE(?CROSSBAR_CACHE)
+    {'ok', {{'one_for_one', 10, 10}, [?CACHE
                                       ,?SUPER('crossbar_module_sup')
                                       ,?WORKER('crossbar_bindings')
                                       ,?WORKER('crossbar_cleanup')
