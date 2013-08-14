@@ -18,6 +18,8 @@
 
 -include("ts.hrl").
 
+-define(CACHE, {?TS_CACHE, {'wh_cache', 'start_link', [?TS_CACHE]}, 'permanent', 5000, 'worker', ['wh_cache']}).
+
 %% ===================================================================
 %% API functions
 %% ===================================================================
@@ -32,7 +34,8 @@ start_link() ->
 
 init([]) ->
     {'ok', { {'one_for_one', 5, 10}
-             ,[?SUPER('ts_onnet_sup') %% handles calls originating on-net (customer)
+             ,[?CACHE
+               ,?SUPER('ts_onnet_sup') %% handles calls originating on-net (customer)
                ,?WORKER('ts_offnet_sup') %% handles calls originating off-net (carrier)
                ,?WORKER('ts_responder')
               ]}
