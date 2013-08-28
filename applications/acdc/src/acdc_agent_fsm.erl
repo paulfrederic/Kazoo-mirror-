@@ -349,11 +349,24 @@ init([AcctId, AgentId, Supervisor, Props, IsThief]) ->
                           ,max_connect_failures=max_failures(AcctDb, AcctId)
                          }}.
 
+-spec max_failures(ne_binary(), ne_binary()) -> non_neg_integer().
+-spec max_failures(wh_json:object()) -> non_neg_integer().
 max_failures(AcctDb, AcctId) ->
     case couch_mgr:open_cache_doc(AcctDb, AcctId) of
-        {'ok', AcctJObj} ->
-            wh_json:get_integer_value(<<"max_connect_failures">>, AcctJObj, ?MAX_FAILURES);
+        {'ok', AcctJObj} -> max_failures(AcctJObj);
         {'error', _} -> ?MAX_FAILURES
+    end.
+
+max_failures(JObj) ->
+    case wh_json:get_value(<<"max_connect_failures">>, JObj) of
+        'undefined' -> ?MAX_FAILURES;
+        <<>> -> ?MAX_FAILURES;
+        V ->
+            try wh_util:to_integer(V) of
+                N -> N
+            catch
+                'error':'badarg' -> ?MAX_FAILURES
+            end
     end.
 
 wait_for_listener(Supervisor, FSM, Props, IsThief) ->
