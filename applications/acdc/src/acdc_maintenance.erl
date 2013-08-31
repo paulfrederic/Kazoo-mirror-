@@ -10,6 +10,7 @@
 
 -export([current_calls/1, current_calls/2
          ,current_statuses/1
+         ,queues_summary/0, queues_summary/1, queue_summary/2
         ]).
 
 -include("acdc.hrl").
@@ -93,3 +94,25 @@ show_stats([S|Ss]) ->
          || {K, V} <- wh_json:to_proplist(wh_doc:public_fields(S))
         ],
     show_stats(Ss).
+
+queues_summary() ->
+    show_queues_summary(acdc_queues_sup:queues_running()).
+
+queues_summary(AcctId) ->
+    show_queues_summary(
+      [Q || {_, {QAcctId, _}} = Q <- acdc_queues_sup:queues_running(),
+            QAcctId =:= AcctId
+      ]).
+
+queue_summary(AcctId, QueueId) ->
+    show_queues_summary(
+      [Q || {_, {QAcctId, QQueueId}} = Q <- acdc_queues_sup:queues_running(),
+            QAcctId =:= AcctId,
+            QQueueId =:= QueueId
+      ]).
+
+show_queues_summary([]) -> 'ok';
+show_queues_summary([{P, {AcctId, QueueId}}|Qs]) ->
+    io:format("  P: ~p A: ~s Q: ~s~n", [P, AcctId, QueueId]),
+    show_queues_summary(Qs).
+
