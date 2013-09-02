@@ -25,6 +25,8 @@
          ,agent_wrapup/3
          ,agent_paused/3
          ,agent_outbound/3
+
+         ,agent_statuses/0
         ]).
 
 %% ETS config
@@ -273,6 +275,10 @@ agent_outbound(AcctId, AgentId, CallId) ->
              ]),
     whapps_util:amqp_pool_send(Prop, fun wapi_acdc_stats:publish_status_outbound/1).
 
+-spec agent_statuses() -> ne_binaries().
+agent_statuses() ->
+    ?STATUS_STATUSES.
+
 %% ETS config
 call_table_id() -> 'acdc_stats_call'.
 call_key_pos() -> #call_stat.id.
@@ -374,7 +380,7 @@ handle_status_stat(JObj, Props) ->
 -spec wait_time(ne_binary(), wh_json:object()) -> api_integer().
 wait_time(<<"paused">>, _) -> 'undefined';
 wait_time(_, JObj) -> wh_json:get_integer_value(<<"Wait-Time">>, JObj).
-    
+
 -spec pause_time(ne_binary(), wh_json:object()) -> api_integer().
 pause_time(<<"paused">>, JObj) ->
     case wh_json:get_integer_value(<<"Pause-Time">>, JObj) of
