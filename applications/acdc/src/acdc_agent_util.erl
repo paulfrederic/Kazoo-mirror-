@@ -107,7 +107,7 @@ most_recent_statuses(AcctId, AgentId, Options) ->
 
     maybe_reduce_statuses(AgentId, receive_statuses([ETS, DB])).
 
--spec maybe_start_db_lookup(atom(), ne_binary(), ne_binary(), list(), pid()) ->
+-spec maybe_start_db_lookup(atom(), ne_binary(), api_binary(), list(), pid()) ->
                                    {pid(), reference()} |
                                    'undefined'.
 maybe_start_db_lookup(F, AcctId, AgentId, Options, Self) ->
