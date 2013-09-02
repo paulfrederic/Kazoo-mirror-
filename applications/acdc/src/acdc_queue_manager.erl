@@ -224,7 +224,9 @@ should_ignore_member_call(Srv, Call, CallJObj) ->
                        ),
     gen_listener:call(Srv, {'should_ignore_member_call', K}).
 
+-spec config(pid()) -> {ne_binary(), ne_binary()}.
 config(Srv) -> gen_listener:call(Srv, 'config').
+
 current_agents(Srv) -> gen_listener:call(Srv, 'current_agents').
 status(Srv) -> gen_listener:call(Srv, 'status').
 
@@ -259,7 +261,7 @@ init([Super, QueueJObj]) ->
     put('callid', <<"mgr_", QueueId/binary>>),
 
     init(Super, AcctId, QueueId, QueueJObj);
-    
+
 init([Super, AcctId, QueueId]) ->
     put('callid', <<"mgr_", QueueId/binary>>),
 
