@@ -22,6 +22,7 @@
 -define(KEYS, [<<"Waiting">>, <<"Handled">>, <<"Processed">>, <<"Abandoned">>]).
 
 current_statuses(AcctId) ->
+    put('callid', ?MODULE),
     {'ok', Agents} = acdc_agent_util:most_recent_statuses(AcctId),
     case wh_json:get_values(Agents) of
         {[], []} ->
@@ -45,18 +46,21 @@ log_current_status(A, N) ->
                                               ]).
 
 current_calls(AcctId) ->
+    put('callid', ?MODULE),
     Req = [{<<"Account-ID">>, AcctId}
            | wh_api:default_headers(?APP_NAME, ?APP_VERSION)
           ],
     get_and_show(AcctId, <<"all">>, Req).
 
 current_calls(AcctId, QueueId) when is_binary(QueueId) ->
+    put('callid', ?MODULE),
     Req = [{<<"Account-ID">>, AcctId}
            ,{<<"Queue-ID">>, QueueId}
            | wh_api:default_headers(?APP_NAME, ?APP_VERSION)
           ],
     get_and_show(AcctId, QueueId, Req);
 current_calls(AcctId, Props) ->
+    put('callid', ?MODULE),
     Req = [{<<"Account-ID">>, AcctId}
            | Props ++ wh_api:default_headers(?APP_NAME, ?APP_VERSION)
           ],
@@ -79,6 +83,7 @@ get_and_show(AcctId, QueueId, Req) ->
 
 show_call_stats([], _) -> 'ok';
 show_call_stats([Resp|Resps], Ks) ->
+    put('callid', ?MODULE),
     show_call_stat_cat(Ks, Resp),
     show_call_stats(Resps, Ks).
 
@@ -103,15 +108,18 @@ show_stats([S|Ss]) ->
 -spec queues_summary(ne_binary()) -> 'ok'.
 -spec queue_summary(ne_binary(), ne_binary()) -> 'ok'.
 queues_summary() ->
+    put('callid', ?MODULE),
     show_queues_summary(acdc_queues_sup:queues_running()).
 
 queues_summary(AcctId) ->
+    put('callid', ?MODULE),
     show_queues_summary(
       [Q || {_, {QAcctId, _}} = Q <- acdc_queues_sup:queues_running(),
             QAcctId =:= AcctId
       ]).
 
 queue_summary(AcctId, QueueId) ->
+    put('callid', ?MODULE),
     show_queues_summary(
       [Q || {_, {QAcctId, QQueueId}} = Q <- acdc_queues_sup:queues_running(),
             QAcctId =:= AcctId,
@@ -125,28 +133,34 @@ show_queues_summary([{P, {AcctId, QueueId}}|Qs]) ->
     show_queues_summary(Qs).
 
 queues_detail() ->
+    put('callid', ?MODULE),
     acdc_queues_sup:status().
 queues_detail(AcctId) ->
+    put('callid', ?MODULE),
     [acdc_queue_sup:status(S)
      || S <- acdc_queues_sup:find_acct_supervisors(AcctId)
     ],
     'ok'.
 queue_detail(AcctId, QueueId) ->
+    put('callid', ?MODULE),
     case acdc_queues_sup:find_queue_supervisor(AcctId, QueueId) of
         'undefined' -> lager:info("no queue ~s in account ~s", [QueueId, AcctId]);
         Pid -> acdc_queue_sup:status(Pid)
     end.
 
 agents_summary() ->
+    put('callid', ?MODULE),
     show_agents_summary(acdc_agents_sup:agents_running()).
 
 agents_summary(AcctId) ->
+    put('callid', ?MODULE),
     show_agents_summary(
       [A || {_, {AAcctId, _, _}} = A <- acdc_agents_sup:agents_running(),
             AAcctId =:= AcctId
       ]).
 
 agent_summary(AcctId, AgentId) ->
+    put('callid', ?MODULE),
     show_agents_summary(
       [Q || {_, {AAcctId, AAgentId, _}} = Q <- acdc_agents_sup:agents_running(),
             AAcctId =:= AcctId,
@@ -160,13 +174,16 @@ show_agents_summary([{P, {AcctId, QueueId, _AMQPQueue}}|Qs]) ->
     show_queues_summary(Qs).
 
 agents_detail() ->
+    put('callid', ?MODULE),
     acdc_agents_sup:status().
 agents_detail(AcctId) ->
+    put('callid', ?MODULE),
     [acdc_agent_sup:status(S)
      || S <- acdc_agents_sup:find_acct_supervisors(AcctId)
     ],
     'ok'.
 agent_detail(AcctId, AgentId) ->
+    put('callid', ?MODULE),
     case acdc_agents_sup:find_agent_supervisor(AcctId, AgentId) of
         'undefined' -> lager:info("no agent ~s in account ~s", [AgentId, AcctId]);
         Pid -> acdc_agent_sup:status(Pid)
