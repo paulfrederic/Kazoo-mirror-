@@ -28,10 +28,6 @@
 %% Supervisor callbacks
 -export([init/1]).
 
-%% Helper macro for declaring children of supervisor
--define(CHILD(Name, Restart, Shutdown, Type),
-        {Name, {Name, 'start_link', []}, Restart, Shutdown, Type, [Name]}).
-
 %%%===================================================================
 %%% API functions
 %%%===================================================================
