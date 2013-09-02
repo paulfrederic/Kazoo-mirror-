@@ -25,10 +25,10 @@ current_statuses(AcctId) ->
     {'ok', Agents} = acdc_agent_util:most_recent_statuses(AcctId),
     case wh_json:get_values(Agents) of
         {[], []} ->
-            lager:debug("No agent statuses found for ~s", [AcctId]);
+            lager:info("No agent statuses found for ~s", [AcctId]);
         {As, _} ->
-            lager:debug("Agent Statuses for ~s", [AcctId]),
-            lager:debug("~4s | ~35s | ~12s | ~20s |", [<<>>, <<"Agent-ID">>, <<"Status">>, <<"Timestamp">>]),
+            lager:info("Agent Statuses for ~s", [AcctId]),
+            lager:info("~4s | ~35s | ~12s | ~20s |", [<<>>, <<"Agent-ID">>, <<"Status">>, <<"Timestamp">>]),
             log_current_statuses(As, 1)
     end,
     'ok'.
@@ -39,7 +39,7 @@ log_current_statuses([A|As], N) ->
     log_current_statuses(As, N+1).
 
 log_current_status(A, N) ->
-    lager:debug("~4b | ~35s | ~12s | ~20s |", [N, wh_json:get_value(<<"agent_id">>, A)
+    lager:info("~4b | ~35s | ~12s | ~20s |", [N, wh_json:get_value(<<"agent_id">>, A)
                                                ,wh_json:get_value(<<"status">>, A)
                                                ,wh_util:pretty_print_datetime(wh_json:get_integer_value(<<"timestamp">>, A))
                                               ]).
@@ -87,7 +87,7 @@ show_call_stat_cat([K|Ks], Resp) ->
     case wh_json:get_value(K, Resp) of
         'undefined' -> show_call_stat_cat(Ks, Resp);
         V ->
-            lager:debug("call stats in ~s", [K]),
+            lager:info("call stats in ~s", [K]),
             show_stats(V),
             show_call_stat_cat(Ks, Resp)
     end.
@@ -133,7 +133,7 @@ queues_detail(AcctId) ->
     'ok'.
 queue_detail(AcctId, QueueId) ->
     case acdc_queues_sup:find_queue_supervisor(AcctId, QueueId) of
-        'undefined' -> lager:debug("no queue ~s in account ~s", [QueueId, AcctId]);
+        'undefined' -> lager:info("no queue ~s in account ~s", [QueueId, AcctId]);
         Pid -> acdc_queue_sup:status(Pid)
     end.
 
@@ -168,6 +168,6 @@ agents_detail(AcctId) ->
     'ok'.
 agent_detail(AcctId, AgentId) ->
     case acdc_agents_sup:find_agent_supervisor(AcctId, AgentId) of
-        'undefined' -> lager:debug("no agent ~s in account ~s", [AgentId, AcctId]);
+        'undefined' -> lager:info("no agent ~s in account ~s", [AgentId, AcctId]);
         Pid -> acdc_agent_sup:status(Pid)
     end.
