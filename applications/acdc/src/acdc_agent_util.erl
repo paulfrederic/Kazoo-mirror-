@@ -91,7 +91,7 @@ most_recent_db_status(AcctId, AgentId) ->
 -spec most_recent_statuses(ne_binary(), ne_binary() | wh_proplist()) -> statuses_return().
 -spec most_recent_statuses(ne_binary(), api_binary(), wh_proplist()) -> statuses_return().
 
-most_recent_statuses(AcctId) ->
+most_recent_statuses(?NE_BINARY = AcctId) ->
     most_recent_statuses(AcctId, 'undefined', []).
 most_recent_statuses(AcctId, ?NE_BINARY = AgentId) ->
     most_recent_statuses(AcctId, AgentId, []);
@@ -108,7 +108,8 @@ most_recent_statuses(AcctId, AgentId, Options) ->
     maybe_reduce_statuses(AgentId, receive_statuses([ETS, DB])).
 
 -spec maybe_start_db_lookup(atom(), ne_binary(), ne_binary(), list(), pid()) ->
-                                   {pid(), reference()} | 'undefined'.
+                                   {pid(), reference()} |
+                                   'undefined'.
 maybe_start_db_lookup(F, AcctId, AgentId, Options, Self) ->
     case wh_cache:fetch_local(?ACDC_CACHE, db_fetch_key(F, AcctId, AgentId)) of
         {'ok', _} -> 'undefined';
@@ -222,11 +223,11 @@ most_recent_ets_statuses(AcctId, AgentId, Options) ->
     end.
 
 -spec most_recent_db_statuses(ne_binary()) ->
-                                      statuses_return() |
-                                      {'error', _}.
+                                     statuses_return() |
+                                     {'error', _}.
 -spec most_recent_db_statuses(ne_binary(), api_binary(), wh_proplist()) ->
-                                      statuses_return() |
-                                      {'error', _}.
+                                     statuses_return() |
+                                     {'error', _}.
 most_recent_db_statuses(AcctId) ->
     most_recent_db_statuses(AcctId, 'undefined', []).
 most_recent_db_statuses(AcctId, ?NE_BINARY = AgentId) ->
