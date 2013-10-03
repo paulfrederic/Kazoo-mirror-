@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2012, VoIP, INC
+%%% @copyright (C) 2012-2013, 2600Hz, INC
 %%% @doc
 %%%
 %%% @end
@@ -84,13 +84,13 @@ sync([ServiceItem|ServiceItems], AccountId, Updates) ->
 %%--------------------------------------------------------------------
 %% @public
 %% @doc
-%% 
+%%
 %% @end
 %%--------------------------------------------------------------------
 -spec transactions(ne_binary(), atom(), atom()) -> atom() | [wh_json:object(), ...].
 transactions(AccountId, Min, Max) ->
     try braintree_transaction:find_by_customer(AccountId, Min, Max) of
-        Transactions -> 
+        Transactions ->
             [braintree_transaction:record_to_json(Tr) || Tr <- Transactions]
     catch
         throw:{'not_found', _} -> 'not_found';
@@ -100,13 +100,13 @@ transactions(AccountId, Min, Max) ->
 %%--------------------------------------------------------------------
 %% @public
 %% @doc
-%% 
+%%
 %% @end
 %%--------------------------------------------------------------------s
 -spec subscriptions(ne_binary()) -> atom() | [wh_json:object(), ...].
 subscriptions(AccountId) ->
     try braintree_customer:find(AccountId) of
-        Customer -> 
+        Customer ->
             [braintree_subscription:record_to_json(Sub) || Sub <-  braintree_customer:get_subscriptions(Customer)]
     catch
         throw:{'not_found', _} -> 'not_found';
@@ -120,7 +120,7 @@ subscriptions(AccountId) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec handle_single_discount/2 :: (wh_service_item:item(), braintree_subscription:subscription()) -> braintree_subscription:subscription().
+-spec handle_single_discount(wh_service_item:item(), braintree_subscription:subscription()) -> braintree_subscription:subscription().
 handle_single_discount(ServiceItem, Subscription) ->
     DiscountId = braintree_single_discount_id(ServiceItem),
     SingleDiscount = wh_service_item:single_discount(ServiceItem),
@@ -140,7 +140,7 @@ handle_single_discount(ServiceItem, Subscription) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cumulative_discounts/2 :: (wh_service_item:item(), braintree_subscription:subscription()) -> braintree_subscription:subscription().
+-spec handle_cumulative_discounts(wh_service_item:item(), braintree_subscription:subscription()) -> braintree_subscription:subscription().
 handle_cumulative_discounts(ServiceItem, Subscription) ->
     DiscountId = braintree_cumulative_discount_id(ServiceItem),
     CumulativeDiscount = wh_service_item:cumulative_discount(ServiceItem),
@@ -160,7 +160,7 @@ handle_cumulative_discounts(ServiceItem, Subscription) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_bt_customer/2 :: (ne_binary(), boolean()) -> 'undefined' | braintree_customer:customer().
+-spec fetch_bt_customer(ne_binary(), boolean()) -> 'undefined' | braintree_customer:customer().
 fetch_bt_customer(AccountId, NewItems) ->
     lager:debug("requesting braintree customer ~s", [AccountId]),
     try braintree_customer:find(AccountId) of
@@ -177,7 +177,7 @@ fetch_bt_customer(AccountId, NewItems) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec update_subscriptions/3 :: (ne_binary(), #wh_service_update{}, #wh_service_updates{}) -> #wh_service_updates{}.
+-spec update_subscriptions(ne_binary(), #wh_service_update{}, #wh_service_updates{}) -> #wh_service_updates{}.
 update_subscriptions(PlanId, Subscription, #wh_service_updates{bt_subscriptions=Subscriptions}=Updates) ->
     Update = #wh_service_update{bt_subscription=Subscription, plan_id=PlanId},
     Updates#wh_service_updates{bt_subscriptions=lists:keystore(PlanId, #wh_service_update.plan_id, Subscriptions, Update)}.
@@ -188,7 +188,7 @@ update_subscriptions(PlanId, Subscription, #wh_service_updates{bt_subscriptions=
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_or_create_subscription/2 :: (ne_binary(), #wh_service_updates{}) -> braintree_subscription:subscription().
+-spec fetch_or_create_subscription(ne_binary(), #wh_service_updates{}) -> braintree_subscription:subscription().
 fetch_or_create_subscription(PlanId, #wh_service_updates{bt_subscriptions=Subscriptions
                                                          ,bt_customer=Customer}) ->
     case lists:keyfind(PlanId, #wh_service_update.plan_id, Subscriptions) of
@@ -212,7 +212,7 @@ fetch_or_create_subscription(PlanId, #wh_service_updates{bt_subscriptions=Subscr
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec braintree_plan_addon_id/1 :: (wh_service_items:item()) -> {api_binary(), api_binary()}.
+-spec braintree_plan_addon_id(wh_service_items:item()) -> {api_binary(), api_binary()}.
 braintree_plan_addon_id(ServiceItem) ->
     JObj = wh_service_item:bookkeeper(<<"braintree">>, ServiceItem),
     {wh_json:get_value(<<"plan">>, JObj), wh_json:get_value(<<"addon">>, JObj)}.
@@ -223,7 +223,7 @@ braintree_plan_addon_id(ServiceItem) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec braintree_cumulative_discount_id/1 :: (wh_service_item:item()) -> api_binary().
+-spec braintree_cumulative_discount_id(wh_service_item:item()) -> api_binary().
 braintree_cumulative_discount_id(ServiceItem) ->
     wh_service_item:bookkeeper([<<"braintree">>, <<"discounts">>, <<"cumulative">>], ServiceItem).
 
@@ -233,6 +233,6 @@ braintree_cumulative_discount_id(ServiceItem) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec braintree_single_discount_id/1 :: (wh_service_items:item()) -> {api_binary(), api_binary()}.
+-spec braintree_single_discount_id(wh_service_items:item()) -> {api_binary(), api_binary()}.
 braintree_single_discount_id(ServiceItem) ->
     wh_service_item:bookkeeper([<<"braintree">>, <<"discounts">>, <<"single">>], ServiceItem).

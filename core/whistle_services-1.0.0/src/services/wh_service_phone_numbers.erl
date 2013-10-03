@@ -69,8 +69,7 @@ reconcile(Services) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec update_numbers(ne_binaries(), wh_json:object(), wh_services:services()) -> wh_services:services().
-update_numbers([], _, Services) ->
-    Services;
+update_numbers([], _, Services) -> Services;
 update_numbers([Number|Numbers], JObj, Services) ->
     case wnm_util:is_reconcilable(Number) of
         'false' -> Services;

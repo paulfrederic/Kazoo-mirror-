@@ -68,16 +68,24 @@ lookup_account_by_number(Number) ->
         #number{assigned_to='undefined'} ->
             lager:debug("number ~s not assigned to an account", [Number]),
             {'error', 'unassigned'};
-        #number{assigned_to=AssignedTo, state = <<"port_in">>}=N ->
+        #number{assigned_to=AssignedTo
+                ,state = <<"port_in">>
+               }=N ->
             lager:debug("number ~s is assigned to ~s in state port_in", [Number, AssignedTo]),
             {'ok', AssignedTo, number_options(N)};
-        #number{assigned_to=AssignedTo, state = <<"in_service">>}=N ->
+        #number{assigned_to=AssignedTo
+                ,state = <<"in_service">>
+               }=N ->
             lager:debug("number ~s is assigned to ~s in state in_service", [Number, AssignedTo]),
             {'ok', AssignedTo, number_options(N)};
-        #number{assigned_to=AssignedTo, state = <<"port_out">>}=N ->
+        #number{assigned_to=AssignedTo
+                ,state = <<"port_out">>
+               }=N ->
             lager:debug("number ~s is assigned to ~s in state port_in", [Number, AssignedTo]),
             {'ok', AssignedTo, number_options(N)};
-        #number{assigned_to=AssignedTo, state=State} ->
+        #number{assigned_to=AssignedTo
+                ,state=State
+               } ->
             lager:debug("number ~s assigned to acccount id ~s but in state ~s", [Number, AssignedTo, State]),
             {'error', {'not_in_service', AssignedTo}}
     catch
@@ -305,7 +313,8 @@ free_numbers(AccountId) ->
                 ],
             'ok';
         {_R, _} ->
-            lager:debug("failed to open account ~s ~s document: ~p", [AccountId, ?WNM_PHONE_NUMBER_DOC, _R])
+            lager:debug("failed to open account ~s ~s document: ~p", [AccountId, ?WNM_PHONE_NUMBER_DOC, _R]),
+            'ok'
     end.
 
 %%--------------------------------------------------------------------
@@ -420,9 +429,9 @@ list_attachments(Number, AuthBy) ->
                  end
                 ,fun({_, #number{}}=E) -> E;
                     (#number{assigned_to=AssignedTo}=N) ->
-                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                            false -> wnm_number:error_unauthorized(N);
-                            true -> N
+                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                            'false' -> wnm_number:error_unauthorized(N);
+                            'true' -> N
                         end
                  end
                 ,fun({E, #number{error_jobj=Reason}}) ->
@@ -430,10 +439,10 @@ list_attachments(Number, AuthBy) ->
                          {E, Reason};
                     (#number{number_doc=JObj}) ->
                          lager:debug("list attachements successfully completed", []),
-                         {ok, wh_json:get_value(<<"_attachments">>, JObj, wh_json:new())}
+                         {'ok', wh_json:get_value(<<"_attachments">>, JObj, wh_json:new())}
                  end
                ],
-    lists:foldl(fun(F, J) -> catch F(J) end, ok, Routines).
+    lists:foldl(fun(F, J) -> catch F(J) end, 'ok', Routines).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -451,9 +460,9 @@ fetch_attachment(Number, Name, AuthBy) ->
                  end
                 ,fun({_, #number{}}=E) -> E;
                     (#number{assigned_to=AssignedTo}=N) ->
-                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                            false -> wnm_number:error_unauthorized(N);
-                            true -> N
+                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                            'false' -> wnm_number:error_unauthorized(N);
+                            'true' -> N
                         end
                  end
                 ,fun({E, #number{error_jobj=Reason}}) ->
@@ -465,7 +474,7 @@ fetch_attachment(Number, Name, AuthBy) ->
                          couch_mgr:fetch_attachment(Db, Num, Name)
                  end
                ],
-    lists:foldl(fun(F, J) -> catch F(J) end, ok, Routines).
+    lists:foldl(fun(F, J) -> catch F(J) end, 'ok', Routines).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -483,9 +492,9 @@ put_attachment(Number, Name, Content, Options, AuthBy) ->
                  end
                 ,fun({_, #number{}}=E) -> E;
                     (#number{assigned_to=AssignedTo}=N) ->
-                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                            false -> wnm_number:error_unauthorized(N);
-                            true -> N
+                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                            'false' -> wnm_number:error_unauthorized(N);
+                            'true' -> N
                         end
                  end
                 ,fun({E, #number{error_jobj=JObj}}) ->
@@ -495,10 +504,10 @@ put_attachment(Number, Name, Content, Options, AuthBy) ->
                          lager:debug("attempting to put attachement ~s", [Name]),
                          Db = wnm_util:number_to_db_name(Num),
                          Rev = wh_json:get_value(<<"_rev">>, JObj),
-                         couch_mgr:put_attachment(Db, Num, Name, Content, [{rev, Rev}|Options])
+                         couch_mgr:put_attachment(Db, Num, Name, Content, [{'rev', Rev}|Options])
                  end
                ],
-    lists:foldl(fun(F, J) -> catch F(J) end, ok, Routines).
+    lists:foldl(fun(F, J) -> catch F(J) end, 'ok', Routines).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -516,9 +525,9 @@ delete_attachment(Number, Name, AuthBy) ->
                  end
                 ,fun({_, #number{}}=E) -> E;
                     (#number{assigned_to=AssignedTo}=N) ->
-                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                            false -> wnm_number:error_unauthorized(N);
-                            true -> N
+                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                            'false' -> wnm_number:error_unauthorized(N);
+                            'true' -> N
                         end
                  end
                 ,fun({E, #number{error_jobj=Reason}}) ->
@@ -530,7 +539,7 @@ delete_attachment(Number, Name, AuthBy) ->
                          couch_mgr:delete_attachment(Db, Num, Name)
                  end
                ],
-    lists:foldl(fun(F, J) -> catch F(J) end, ok, Routines).
+    lists:foldl(fun(F, J) -> catch F(J) end, 'ok', Routines).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -545,9 +554,9 @@ get_public_fields(Number, AuthBy) ->
                 ,fun({_, #number{}}=E) -> E;
                     (#number{}=N) when AuthBy =:= system -> N;
                     (#number{assigned_to=AssignedTo}=N) ->
-                         case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                             false -> wnm_number:error_unauthorized(N);
-                             true -> N
+                         case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                             'false' -> wnm_number:error_unauthorized(N);
+                             'true' -> N
                          end
                  end
                 ,fun({E, #number{error_jobj=Reason}}) ->
@@ -555,10 +564,10 @@ get_public_fields(Number, AuthBy) ->
                          {E, Reason};
                     (#number{number_doc=JObj}) ->
                          lager:debug("fetch public fields successfully completed", []),
-                         {ok, wh_json:public_fields(JObj)}
+                         {'ok', wh_json:public_fields(JObj)}
                  end
                ],
-    lists:foldl(fun(F, J) -> catch F(J) end, ok, Routines).
+    lists:foldl(fun(F, J) -> catch F(J) end, 'ok', Routines).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -570,9 +579,9 @@ get_public_fields(Number, AuthBy) ->
 set_public_fields(Number, PublicFields, AuthBy) ->
     Routines = [fun({_, #number{}}=E) -> E;
                    (#number{assigned_to=AssignedTo}=N) ->
-                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, true) of
-                            false -> wnm_number:error_unauthorized(N);
-                            true -> N
+                        case wh_util:is_in_account_hierarchy(AuthBy, AssignedTo, 'true') of
+                            'false' -> wnm_number:error_unauthorized(N);
+                            'true' -> N
                         end
                 end
                 ,fun({_, #number{}}=E) -> E;
@@ -583,7 +592,7 @@ set_public_fields(Number, PublicFields, AuthBy) ->
                          {E, Reason};
                     (#number{number_doc=JObj}) ->
                          lager:debug("set public fields successfully completed", []),
-                         {ok, wh_json:public_fields(JObj)}
+                         {'ok', wh_json:public_fields(JObj)}
                  end
                ],
     lists:foldl(fun(F, J) -> catch F(J) end, wnm_number:get(Number, PublicFields), Routines).
@@ -593,8 +602,7 @@ set_public_fields(Number, PublicFields, AuthBy) ->
 track_assignment(Numbers) ->
     track_assignment(Numbers, <<>>).
 
-track_assignment([], _) ->
-    'ok';
+track_assignment([], _) -> 'ok';
 track_assignment(Numbers, Assignment) ->
     Routines = [fun(Nums) ->
                     lists:foldl(
@@ -624,15 +632,16 @@ track_assignment(Numbers, Assignment) ->
 %% ensure the modules data is stored for later acquisition.
 %% @end
 %%--------------------------------------------------------------------
--spec prepare_find_results(wh_proplist(), [] | [wh_json:json_strings(),...]) -> wh_json:json_strings().
--spec prepare_find_results(wh_json:json_strings(), atom(), wh_json:object(), wh_json:json_strings())
-                                -> wh_json:json_strings().
+-spec prepare_find_results(wh_proplist(), [] | [wh_json:json_strings(),...]) ->
+                                  wh_json:json_strings().
+-spec prepare_find_results(wh_json:json_strings(), atom(), wh_json:object(), wh_json:json_strings()) ->
+                                  wh_json:json_strings().
 
 prepare_find_results([], Found) ->
     Results = lists:flatten(Found),
     lager:debug("discovered ~p available numbers", [length(Results)]),
     Results;
-prepare_find_results([{Module, {ok, ModuleResults}}|T], Found) ->
+prepare_find_results([{Module, {'ok', ModuleResults}}|T], Found) ->
     case wh_json:get_keys(ModuleResults) of
         [] -> prepare_find_results(T, Found);
         Numbers ->
@@ -643,19 +652,18 @@ prepare_find_results([{Module, {ok, ModuleResults}}|T], Found) ->
 prepare_find_results([_|T], Found) ->
     prepare_find_results(T, Found).
 
-prepare_find_results([], _, _, Found) ->
-    Found;
+prepare_find_results([], _, _, Found) -> Found;
 prepare_find_results([Number|Numbers], ModuleName, ModuleResults, Found) ->
     case catch wnm_number:get(Number) of
         #number{state=State} ->
             case lists:member(State, ?WNM_AVALIABLE_STATES) of
-                true ->
+                'true' ->
                     prepare_find_results(Numbers, ModuleName, ModuleResults, [Number|Found]);
-                false ->
+                'false' ->
                     lager:debug("the discovery '~s' is not available: ~s", [Number, State]),
                     prepare_find_results(Numbers, ModuleName, ModuleResults, Found)
             end;
-        {not_found, #number{}=N} ->
+        {'not_found', #number{}=N} ->
             NewNumber = N#number{number=Number
                                  ,module_name = ModuleName
                                  ,module_data=wh_json:get_value(Number, ModuleResults)

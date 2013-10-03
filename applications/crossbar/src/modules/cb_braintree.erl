@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2011, VoIP INC
+%%% @copyright (C) 2011-2013, 2600Hz INC
 %%% @doc
 %%%
 %%% Handle client requests for braintree documents
@@ -129,11 +129,11 @@ validate(#cb_context{req_verb = ?HTTP_POST
                               'undefined' -> J;
                               _Else ->
                                   Id = couch_mgr:get_uuid(),
-                                  wh_json:set_value([<<"credit_card">>, <<"id">>], Id, J) 
+                                  wh_json:set_value([<<"credit_card">>, <<"id">>], Id, J)
                           end
                   end
                   ,fun(J) ->
-                           wh_json:set_value(<<"id">>, AccountId, J) 
+                           wh_json:set_value(<<"id">>, AccountId, J)
                    end
                  ],
     Customer = braintree_customer:json_to_record(lists:foldr(fun(F, J) -> F(J) end, JObj, Generators)),
@@ -207,7 +207,7 @@ validate(#cb_context{req_verb = ?HTTP_PUT
     Amount = wh_json:get_float_value(<<"amount">>, JObj),
     MaxCredit = whapps_config:get_float(?MOD_CONFIG_CAT, <<"max_account_credit">>, 500.00),
     case current_account_dollars(AccountId) + Amount > MaxCredit of
-        'true' -> 
+        'true' ->
             Message = <<"Available credit can not exceed $", (wh_util:to_binary(MaxCredit))/binary>>,
             cb_context:add_validation_error(<<"amount">>, <<"maximum">>, Message, Context);
         'false' ->
@@ -429,14 +429,14 @@ current_account_dollars(Account) ->
 maybe_charge_billing_id(Amount, #cb_context{auth_account_id=AuthAccountId, account_id=AccountId}=Context) ->
     {'ok', MasterAccount} = whapps_util:get_master_account_id(),
     case wh_services:find_reseller_id(AccountId) of
-        AuthAccountId -> 
+        AuthAccountId ->
             lager:debug("allowing reseller to apply credit without invoking a bookkeeper", []),
             Resp = wh_json:from_list([{<<"amount">>, Amount}]),
             crossbar_util:response(Resp, Context);
-        MasterAccount -> 
+        MasterAccount ->
             lager:debug("invoking a bookkeeper to acquire requested credit", []),
             charge_billing_id(Amount, Context);
-        _Else -> 
+        _Else ->
             lager:debug("sub-accounts of non-master resellers must contact the reseller to change their credit", []),
             Message = <<"Please contact your phone provider to add credit.">>,
             cb_context:add_validation_error(<<"amount">>, <<"forbidden">>, Message, Context)

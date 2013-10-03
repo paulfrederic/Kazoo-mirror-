@@ -131,8 +131,11 @@ activation_charges(Category, Item, ServicePlans) ->
 %% suitable for use with the bookkeepers.
 %% @end
 %%--------------------------------------------------------------------
--spec create_items(wh_json:object()) -> {'ok', wh_service_items:items()} | {'error', 'no_plans'}.
--spec create_items(wh_services:services(), plans()) -> wh_service_items:items().
+-spec create_items(wh_json:object()) ->
+                          {'ok', wh_service_items:items()} |
+                          {'error', 'no_plans'}.
+-spec create_items(wh_services:services(), plans()) ->
+                          wh_service_items:items().
 
 create_items(ServiceJObj) ->
     Services = wh_services:from_service_json(ServiceJObj),
@@ -174,8 +177,10 @@ public_json_items(ServiceJObj) ->
 %% in the vendors #wh_service_plans data structure.
 %% @end
 %%--------------------------------------------------------------------
--spec get_plans(ne_binaries(), ne_binary(), wh_json:object()) -> plans().
--spec get_plans(ne_binaries(), ne_binary(), wh_json:object(), plans()) -> plans().
+-spec get_plans(ne_binaries(), ne_binary(), wh_json:object()) ->
+                       plans().
+-spec get_plans(ne_binaries(), ne_binary(), wh_json:object(), plans()) ->
+                       plans().
 
 get_plans(PlanIds, ResellerId, Sevices) ->
     get_plans(PlanIds, ResellerId, Sevices, empty()).
@@ -216,7 +221,8 @@ append_vendor_plan(Plan, VendorId, ServicePlans) ->
     case lists:keyfind(VendorId, #wh_service_plans.vendor_id, ServicePlans) of
         'false' ->
             ServicePlan = #wh_service_plans{vendor_id=VendorId
-                                            ,plans=[Plan]},
+                                            ,plans=[Plan]
+                                           },
             [ServicePlan|ServicePlans];
         #wh_service_plans{plans=Plans}=ServicePlan ->
             lists:keyreplace(VendorId, #wh_service_plans.vendor_id, ServicePlans

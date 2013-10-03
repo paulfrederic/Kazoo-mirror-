@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2012, VoIP, INC
+%%% @copyright (C) 2012-2013, 2600Hz, INC
 %%% @doc
 %%%
 %%% @end
@@ -20,7 +20,7 @@
 %% Merge any plan overrides into the plan property.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch(ne_binary(), ne_binary(), wh_json:object()) -> 'undefined' | wh_json:object().
+-spec fetch(ne_binary(), ne_binary(), wh_json:object()) -> api_object().
 fetch(PlanId, VendorId, Overrides) ->
     VendorDb = wh_util:format_account_id(VendorId, 'encoded'),
     case couch_mgr:open_doc(VendorDb, PlanId) of
@@ -48,8 +48,10 @@ activation_charges(Category, Item, ServicePlan) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec create_items(wh_json:object(), wh_service_items:items(), wh_services:services()) -> wh_service_items:items().
--spec create_items(ne_binary(), ne_binary(), wh_json:object(), wh_service_items:items(), wh_services:services()) -> wh_service_items:items().
+-spec create_items(wh_json:object(), wh_service_items:items(), wh_services:services()) ->
+                          wh_service_items:items().
+-spec create_items(ne_binary(), ne_binary(), wh_service_items:items(), wh_json:object(), wh_services:services()) ->
+                          wh_service_items:items().
 
 create_items(ServicePlan, ServiceItems, Services) ->
     Plan = wh_json:get_value(<<"plan">>, ServicePlan, wh_json:new()),
@@ -172,7 +174,7 @@ get_flat_rate(Quantity, JObj) ->
 %% quantity.  If no rates are viable attempt to use the "rate" property.
 %% @end
 %%--------------------------------------------------------------------
--spec get_quantity_rate(non_neg_integer(), wh_json:object()) -> float().
+-spec get_quantity_rate(non_neg_integer(), wh_json:object()) -> api_float().
 get_quantity_rate(Quantity, JObj) ->
     Rates = wh_json:get_value(<<"rates">>, JObj, wh_json:new()),
     L1 = [wh_util:to_integer(K) || K <- wh_json:get_keys(Rates)],
