@@ -1,24 +1,26 @@
 %%%-------------------------------------------------------------------
-%%% @author James Aimonetti <james@2600hz.org>
-%%% @copyright (C) 2011, VoIP INC
+%%% @copyright (C) 2011-2013, 2600Hz INC
 %%% @doc
 %%% Manage offnet calls
 %%% @end
-%%% Created : 18 Jun 2011 by James Aimonetti
+%%% @contributors
+%%%   James Aimonetti
 %%%-------------------------------------------------------------------
 -module(ts_offnet_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_handler/2, stop_handler/1]).
+-export([start_link/0
+         ,new/1
+        ]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
--define(SERVER, ?MODULE).
+-include("ts.hrl").
 
--define(CHILD(ID, Args), {ID, {ts_from_offnet, start_link, [Args]}, temporary, 2000, worker, [ts_from_offnet]}).
+-define(SERVER, ?MODULE).
 
 %%%===================================================================
 %%% API functions
@@ -31,15 +33,11 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+-spec start_link() -> startlink_ret().
+start_link() -> supervisor:start_link({'local', ?SERVER}, ?MODULE, []).
 
-start_handler(CallID, RouteReqJObj) ->
-    supervisor:start_child(?SERVER, ?CHILD(<<"offnet-", CallID/binary>>, RouteReqJObj)).
-
-stop_handler(CallID) ->
-    ok = supervisor:terminate_child(?SERVER, <<"offnet-", CallID/binary>>),
-    supervisor:delete_child(?SERVER, <<"offnet-", CallID/binary>>).
+-spec new(whapps_call:call()) -> sup_startchild_ret().
+new(Call) -> supervisor:start_child(?SERVER, [Call]).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -59,13 +57,13 @@ stop_handler(CallID) ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    RestartStrategy = one_for_one,
-    MaxRestarts = 1,
-    MaxSecondsBetweenRestarts = 5,
+    RestartStrategy = 'simple_one_for_one',
+    MaxRestarts = 0,
+    MaxSecondsBetweenRestarts = 1,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    {ok, {SupFlags, []}}.
+    {'ok', {SupFlags, [?WORKER_TYPE('ts_offnet', 'temporary')]}}.
 
 %%%===================================================================
 %%% Internal functions

@@ -1,12 +1,11 @@
 -ifndef(TS_HRL).
--include_lib("rabbitmq_client/include/amqp_client.hrl").
 -include_lib("whistle/include/wh_types.hrl").
 -include_lib("whistle/include/wh_amqp.hrl").
 -include_lib("whistle/include/wh_log.hrl").
 -include_lib("whistle/include/wh_databases.hrl").
 
 -define(APP_NAME, <<"trunkstore">>).
--define(APP_VERSION, <<"1.0.0">>).
+-define(APP_VERSION, <<"2.0.0">>).
 
 %% Account views
 -define(TS_VIEW_DIDLOOKUP, <<"trunkstore/LookUpDID">>).

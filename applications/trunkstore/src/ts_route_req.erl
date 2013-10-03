@@ -89,4 +89,5 @@ send_response(JObj, Call) ->
     ServerId = wh_json:get_value(<<"Server-ID">>, JObj),
     Publisher = fun(P) -> wapi_route:publish_resp(ServerId, P) end,
     whapps_util:amqp_pool_send(Resp, Publisher),
+    whapps_call:cache(Call),
     lager:info("trunkstore knows how to route the call! sent park response").
