@@ -1039,10 +1039,25 @@ encode_db(D) ->
 encode_design_doc(Design) ->
     binary:replace(Design, <<"_design/">>, <<>>, ['global']).
 
--spec node_dbs(server()) -> {'ok', wh_json:json_strings()}.
+-spec node_dbs(server()) ->
+                      {'ok', wh_json:json_strings()} |
+                      {'error', 'too_many_retries'}.
 node_dbs(AdminConn) ->
-    {'ok', Dbs} = couch_util:all_docs(AdminConn, <<"dbs">>, []),
-    {'ok', shuffle([wh_json:get_value(<<"id">>, Db) || Db <- Dbs])}.
+    node_dbs(AdminConn, 0).
+node_dbs(_AdminConn, 2) ->
+    {'error', 'too_many_retries'};
+node_dbs(AdminConn, Retries) ->
+    case couch_util:all_docs(AdminConn, <<"dbs">>, []) of
+        {'ok', Dbs} ->
+            {'ok', shuffle([wh_json:get_value(<<"id">>, Db) || Db <- Dbs])};
+        {'error', 'connection_timeout'} ->
+            lager:warning("connection timeout getting node dbs"),
+            timer:sleep(1000),
+            node_dbs(AdminConn, Retries+1);
+        {'error', _E} ->
+            lager:debug("failed to get node dbs of the admin conn: ~p", [_E]),
+            node_dbs(AdminConn, Retries+1)
+    end.
 
 db_shards(AdminConn, N, D) ->
     case couch_util:open_cache_doc(AdminConn, <<"dbs">>, D, []) of
