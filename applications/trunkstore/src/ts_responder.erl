@@ -33,7 +33,9 @@
 -define(RESPONDERS, [{'ts_route_req', [{<<"dialplan">>, <<"route_req">>}]}
                      ,{'ts_route_win', [{<<"dialplan">>, <<"route_win">>}]}
                     ]).
--define(BINDINGS, [{'route', []}]).
+-define(BINDINGS, [{'route', []}
+                   ,{'self', []}
+                  ]).
 
 -define(SERVER, ?MODULE).
 -define(ROUTE_QUEUE_NAME, <<"trunkstore_listener">>).
