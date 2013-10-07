@@ -103,7 +103,9 @@ create_ccvs(#auth_user{}=AuthUser) ->
                               {'error', 'not_found'}.
 lookup_auth_user(Username, Realm) ->
     case get_auth_user(Username, Realm) of
-        {'error', _}=E -> E;
+        {'error', _E}=E ->
+            lager:debug("failed to get auth user: ~p", [_E]),
+            E;
         {'ok', JObj} -> check_auth_user(JObj, Username, Realm)
     end.
 
@@ -118,10 +120,18 @@ lookup_auth_user(Username, Realm) ->
                              {'error', _}.
 check_auth_user(JObj, Username, Realm) ->
     case wh_util:is_account_enabled(wh_json:get_value([<<"doc">>, <<"pvt_account_id">>], JObj))
-        andalso wh_json:is_true([<<"doc">>, <<"enabled">>], JObj, 'false')
+        andalso wh_json:get_value([<<"doc">>, <<"enabled">>], JObj)
     of
         'false' -> {'error', 'not_found'};
-        'true' -> {'ok', jobj_to_auth_user(JObj, Username, Realm)}
+        'true' -> {'ok', jobj_to_auth_user(JObj, Username, Realm)};
+        'undefined' ->
+            lager:warning("no enabled flag for ~s @ ~s, allowing", [Username, Realm]),
+            {'ok', jobj_to_auth_user(JObj, Username, Realm)};
+        Otherwise ->
+            case wh_util:is_true(Otherwise) of
+                'true' -> {'ok', jobj_to_auth_user(JObj, Username, Realm)};
+                'false' -> {'error', 'not_found'}
+            end
     end.
 
 %%-----------------------------------------------------------------------------
@@ -145,6 +155,7 @@ get_auth_user(Username, Realm) ->
             lager:debug("found multiple accounts by realm ~s, using first: ~s", [Realm, AccountDB]),
             get_auth_user_in_account(Username, Realm, AccountDB);
         {'ok', AccountDB} ->
+            lager:debug("found account db ~s by realm ~s", [AccountDB, Realm]),
             get_auth_user_in_account(Username, Realm, AccountDB)
     end.
 
