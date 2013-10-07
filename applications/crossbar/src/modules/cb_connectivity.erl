@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2011, VoIP INC
+%%% @copyright (C) 2011-2013, 2600Hz INC
 %%% @doc
 %%%
 %%% Handle client requests for connectivity documents
@@ -28,12 +28,12 @@
 %%% API
 %%%===================================================================
 init() ->
-    _ = crossbar_bindings:bind(<<"v1_resource.allowed_methods.connectivity">>, ?MODULE, allowed_methods),
-    _ = crossbar_bindings:bind(<<"v1_resource.resource_exists.connectivity">>, ?MODULE, resource_exists),
-    _ = crossbar_bindings:bind(<<"v1_resource.validate.connectivity">>, ?MODULE, validate),
-    _ = crossbar_bindings:bind(<<"v1_resource.execute.put.connectivity">>, ?MODULE, put),
-    _ = crossbar_bindings:bind(<<"v1_resource.execute.post.connectivity">>, ?MODULE, post),
-    crossbar_bindings:bind(<<"v1_resource.execute.delete.connectivity">>, ?MODULE, delete).
+    _ = crossbar_bindings:bind(<<"v1_resource.allowed_methods.connectivity">>, ?MODULE, 'allowed_methods'),
+    _ = crossbar_bindings:bind(<<"v1_resource.resource_exists.connectivity">>, ?MODULE, 'resource_exists'),
+    _ = crossbar_bindings:bind(<<"v1_resource.validate.connectivity">>, ?MODULE, 'validate'),
+    _ = crossbar_bindings:bind(<<"v1_resource.execute.put.connectivity">>, ?MODULE, 'put'),
+    _ = crossbar_bindings:bind(<<"v1_resource.execute.post.connectivity">>, ?MODULE, 'post'),
+    crossbar_bindings:bind(<<"v1_resource.execute.delete.connectivity">>, ?MODULE, 'delete').
 
 %%--------------------------------------------------------------------
 %% @public
@@ -61,10 +61,8 @@ allowed_methods(_) ->
 %%--------------------------------------------------------------------
 -spec resource_exists() -> 'true'.
 -spec resource_exists(path_token()) -> 'true'.
-resource_exists() ->
-    true.
-resource_exists(_) ->
-    true.
+resource_exists() -> 'true'.
+resource_exists(_) -> 'true'.
 
 %%--------------------------------------------------------------------
 %% @public
@@ -75,8 +73,8 @@ resource_exists(_) ->
 %% Failure here returns 400
 %% @end
 %%--------------------------------------------------------------------
--spec validate(#cb_context{}) -> #cb_context{}.
--spec validate(#cb_context{}, path_token()) -> #cb_context{}.
+-spec validate(cb_context:context()) -> cb_context:context().
+-spec validate(cb_context:context(), path_token()) -> cb_context:context().
 validate(#cb_context{req_verb = ?HTTP_GET}=Context) ->
     summary(Context);
 validate(#cb_context{req_verb = ?HTTP_PUT}=Context) ->
@@ -89,16 +87,16 @@ validate(#cb_context{req_verb = ?HTTP_POST}=Context, Id) ->
 validate(#cb_context{req_verb = ?HTTP_DELETE}=Context, Id) ->
     read(Id, Context).
 
--spec post(#cb_context{}, path_token()) -> #cb_context{}.
+-spec post(cb_context:context(), path_token()) -> cb_context:context().
 post(Context, _) ->
     track_assignment(Context),
     crossbar_doc:save(Context).
 
--spec put(#cb_context{}) -> #cb_context{}.
+-spec put(cb_context:context()) -> cb_context:context().
 put(Context) ->
     crossbar_doc:save(Context).
 
--spec delete(#cb_context{}, path_token()) -> #cb_context{}.
+-spec delete(cb_context:context(), path_token()) -> cb_context:context().
 delete(Context, _) ->
     crossbar_doc:delete(Context).
 
@@ -164,8 +162,7 @@ get_numbers(JObj) ->
 extract_dids(DidsJObj) ->
     Dids = wh_json:to_proplist(DidsJObj),
     lists:foldl(
-        fun({Did, _}, Acc) ->
-            [Did|Acc]
+        fun({Did, _}, Acc) -> [Did|Acc]
         end, [], Dids
     ).
 
@@ -175,9 +172,9 @@ extract_dids(DidsJObj) ->
 %% Create a new instance with the data provided, if it is valid
 %% @end
 %%--------------------------------------------------------------------
--spec create(#cb_context{}) -> #cb_context{}.
+-spec create(cb_context:context()) -> cb_context:context().
 create(#cb_context{}=Context) ->
-    OnSuccess = fun(C) -> on_successful_validation(undefined, C) end,
+    OnSuccess = fun(C) -> on_successful_validation('undefined', C) end,
     cb_context:validate_request_data(<<"connectivity">>, Context, OnSuccess).
 
 %%--------------------------------------------------------------------
@@ -186,7 +183,7 @@ create(#cb_context{}=Context) ->
 %% Load an instance from the database
 %% @end
 %%--------------------------------------------------------------------
--spec read(ne_binary(), #cb_context{}) -> #cb_context{}.
+-spec read(ne_binary(), cb_context:context()) -> cb_context:context().
 read(Id, Context) ->
     crossbar_doc:load(Id, Context).
 
@@ -197,7 +194,7 @@ read(Id, Context) ->
 %% valid
 %% @end
 %%--------------------------------------------------------------------
--spec update(ne_binary(), #cb_context{}) -> #cb_context{}.
+-spec update(ne_binary(), cb_context:context()) -> cb_context:context().
 update(Id, #cb_context{}=Context) ->
     OnSuccess = fun(C) -> on_successful_validation(Id, C) end,
     cb_context:validate_request_data(<<"connectivity">>, Context, OnSuccess).
@@ -208,8 +205,8 @@ update(Id, #cb_context{}=Context) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec on_successful_validation('undefined' | ne_binary(), #cb_context{}) -> #cb_context{}.
-on_successful_validation(undefined, #cb_context{doc=JObj}=Context) ->
+-spec on_successful_validation(api_binary(), cb_context:context()) -> cb_context:context().
+on_successful_validation('undefined', #cb_context{doc=JObj}=Context) ->
     Context#cb_context{doc=wh_json:set_value(<<"pvt_type">>, <<"sys_info">>, JObj)};
 on_successful_validation(Id, #cb_context{}=Context) ->
     crossbar_doc:load_merge(Id, Context).
@@ -221,9 +218,13 @@ on_successful_validation(Id, #cb_context{}=Context) ->
 %% resource.
 %% @end
 %%--------------------------------------------------------------------
--spec summary(#cb_context{}) -> #cb_context{}.
+-spec summary(cb_context:context()) -> cb_context:context().
 summary(Context) ->
-    crossbar_doc:load_view(?CB_LIST, [{reduce, false}], Context, fun normalize_view_results/2).
+    crossbar_doc:load_view(?CB_LIST
+                           ,[{'reduce', 'false'}]
+                           ,Context
+                           ,fun normalize_view_results/2
+                          ).
 
 %%--------------------------------------------------------------------
 %% @private
