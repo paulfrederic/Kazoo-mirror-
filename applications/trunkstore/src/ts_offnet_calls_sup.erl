@@ -6,15 +6,13 @@
 %%% @contributors
 %%%   James Aimonetti
 %%%-------------------------------------------------------------------
--module(ts_offnet_sup).
+-module(ts_offnet_calls_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/1
-         ,listener/1
-         ,fsm/1
-         ,stop/1
+-export([start_link/0
+         ,new/1
         ]).
 
 %% Supervisor callbacks
@@ -35,30 +33,11 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(whapps_call:call()) -> startlink_ret().
-start_link(Call) -> supervisor:start_link(?MODULE, [Call]).
+-spec start_link() -> startlink_ret().
+start_link() -> supervisor:start_link({'local', ?SERVER}, ?MODULE, []).
 
--spec listener(pid()) -> api_pid().
-listener(Supervisor) ->
-    case child_of_type(Supervisor, 'ts_offnet_listener') of
-        [] -> 'undefined';
-        [Pid] -> Pid
-    end.
-
--spec fsm(pid()) -> api_pid().
-fsm(Supervisor) ->
-    case child_of_type(Supervisor, 'ts_offnet_fsm') of
-        [] -> 'undefined';
-        [Pid] -> Pid
-    end.
-
--spec stop(pid()) -> 'ok' | {'error', 'not_found'}.
-stop(Supervisor) ->
-    supervisor:terminate_child('ts_offnet_calls_sup', Supervisor).
-
--spec child_of_type(pid(), atom()) -> pids().
-child_of_type(S, T) ->
-    [P || {Ty, P, 'worker', _} <- supervisor:which_children(S), T =:= Ty].
+-spec new(whapps_call:call()) -> sup_startchild_ret().
+new(Call) -> supervisor:start_child(?SERVER, [Call]).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -77,16 +56,14 @@ child_of_type(S, T) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init(Args) ->
-    RestartStrategy = 'one_for_all',
+init([]) ->
+    RestartStrategy = 'simple_one_for_one',
     MaxRestarts = 0,
     MaxSecondsBetweenRestarts = 1,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    {'ok', {SupFlags, [?WORKER_ARGS_TYPE('ts_offnet_listener', [self() | Args], 'temporary')
-                       ,?WORKER_ARGS_TYPE('ts_offnet_fsm', [self() | Args], 'temporary')
-                      ]}}.
+    {'ok', {SupFlags, [?SUPER('ts_offnet_sup', 'temporary')]}}.
 
 %%%===================================================================
 %%% Internal functions

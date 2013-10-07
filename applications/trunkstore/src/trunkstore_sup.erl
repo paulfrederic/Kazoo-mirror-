@@ -36,7 +36,7 @@ init([]) ->
     {'ok', { {'one_for_one', 5, 10}
              ,[?CACHE
                ,?SUPER('ts_onnet_sup') %% handles calls originating on-net (customer)
-               ,?WORKER('ts_offnet_sup') %% handles calls originating off-net (carrier)
+               ,?SUPER('ts_offnet_calls_sup') %% handles calls originating off-net (carrier)
                ,?WORKER('ts_responder')
               ]}
     }.

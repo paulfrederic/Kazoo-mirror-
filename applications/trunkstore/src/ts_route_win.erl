@@ -31,5 +31,5 @@ handle_req(JObj, _Props) ->
 process_call(Call) ->
     case whapps_call:inception(Call) of
         <<"on-net">> -> ts_onnet_sup:new(Call);
-        <<"off-net">> -> ts_offnet_sup:new(Call)
+        <<"off-net">> -> ts_offnet_calls_sup:new(Call)
     end.

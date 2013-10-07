@@ -1,44 +1,48 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2013, 2600Hz
+%%% @copyright (C) 2013, 2600Hz INC
 %%% @doc
-%%% Handles onnet calls destined for offnet resources.
+%%%
 %%% @end
 %%% @contributors
 %%%   James Aimonetti
 %%%-------------------------------------------------------------------
--module(ts_offnet).
+-module(ts_offnet_fsm).
 
--behaviour(gen_listener).
+-behaviour(gen_fsm).
 
--export([start_link/1
-         ,events/2
+%% API
+-export([start_link/2]).
+
+-export([listener/2
+         ,build_endpoints/1
+         ,call_event/2
         ]).
+
+%% gen_fsm callbacks
 -export([init/1
-         ,handle_call/3
-         ,handle_cast/2
-         ,handle_info/2
-         ,handle_event/2
-         ,terminate/2
-         ,code_change/3
+
+         ,build/2, build/3
+         ,ringing/2, ringing/3
+         ,answered/2, answered/3
+         ,finished/2, finished/3
+
+         ,handle_event/3
+         ,handle_sync_event/4
+         ,handle_info/3
+         ,terminate/3
+         ,code_change/4
         ]).
 
 -include("ts.hrl").
 
--record(state, {call :: whapps_call:call()
-                ,endpoints = [] :: wh_json:objects()
+-record(state, {endpoint :: api_object()
+                ,failover :: api_object()
                 ,other_leg :: api_binary()
+                ,call :: whapps_call:call()
+                ,call_id :: api_binary()
+                ,listener :: api_pid()
+                ,supervisor :: pid()
                }).
--type state() :: #state{}.
-
-%% By convention, we put the options here in macros, but not required.
--define(BINDINGS, [{'self', []}]).
--define(RESPONDERS, [{{?MODULE, 'events'}
-                     ,[{<<"*">>, <<"*">>}]
-                     }
-                    ]).
--define(QUEUE_NAME, <<>>).
--define(QUEUE_OPTIONS, []).
--define(CONSUME_OPTIONS, []).
 
 %%%===================================================================
 %%% API
@@ -46,209 +50,235 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the server
+%% Creates a gen_fsm process which calls Module:init/1 to
+%% initialize. To ensure a synchronized start-up procedure, this
+%% function does not return until Module:init/1 has returned.
 %%
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(whapps_call:call()) -> startlink_ret().
-start_link(Call) ->
-    Bindings = [{'call', [{'callid', whapps_call:call_id(Call)}
-                          ,{'restrict_to', ['events', 'destroy_channel']}
-                         ]}
-                | ?BINDINGS
-               ],
-    gen_listener:start_link(?MODULE, [
-                                      {'bindings', Bindings}
-                                      ,{'responders', ?RESPONDERS}
-                                      ,{'queue_name', ?QUEUE_NAME}       % optional to include
-                                      ,{'queue_options', ?QUEUE_OPTIONS} % optional to include
-                                      ,{'consume_options', ?CONSUME_OPTIONS} % optional to include
-                                      %%,{basic_qos, 1}                % only needed if prefetch controls
-                                     ], [Call]).
+start_link(Supervisor, Call) ->
+    gen_fsm:start_link(?MODULE, [Supervisor, Call], []).
 
-events(JObj, Props) ->
-    events(JObj, Props, wh_util:get_event_type(JObj)).
+-spec listener(pid(), pid()) -> 'ok'.
+listener(FSM, Listener) ->
+    gen_fsm:send_event(FSM, {'listener', Listener}).
 
-events(JObj, Props, {<<"call_event">>, <<"CHANNEL_DESTROY">>}) ->
-    gen_listener:cast(props:get_value('server', Props)
-                      ,{'channel_destroy', wh_json:get_value(<<"Call-ID">>, JObj)}
-                     );
-events(JObj, Props, {<<"call_event">>, <<"CHANNEL_BRIDGE">>}) ->
-    gen_listener:cast(props:get_value('server', Props)
-                      ,{'channel_bridged', wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)}
-                     );
-events(JObj, Props, {<<"call_event">>, <<"LEG_CREATED">>}) ->
-    gen_listener:cast(props:get_value('server', Props)
-                      ,{'leg_created', wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)}
-                     );
-events(JObj, Props, {<<"call_event">>, <<"LEG_DESTROYED">>}) ->
-    lager:debug("leg dest: ~p", [JObj]),
-    gen_listener:cast(props:get_value('server', Props)
-                      ,{'leg_destroyed'
-                        ,wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)
-                        ,wh_json:get_value(<<"Hangup-Cause">>, JObj)
-                       }
-                     );
-events(_JObj, _Props, _Evt) ->
-    lager:debug("recv unhandled event: ~p", [_Evt]).
+-spec build_endpoints(pid()) -> 'ok'.
+build_endpoints(FSM) ->
+    gen_fsm:send_event(FSM, 'build_endpoints').
+
+-spec call_event(pid(), tuple()) -> 'ok'.
+call_event(FSM, CallEvent) ->
+    gen_fsm:send_event(FSM, CallEvent).
 
 %%%===================================================================
-%%% gen_server callbacks
+%%% gen_fsm callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Initializes the server
+%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
+%% gen_fsm:start_link/[3,4], this function is called by the new
+%% process to initialize.
 %%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
+%% @spec init(Args) -> {ok, StateName, State} |
+%%                     {ok, StateName, State, Timeout} |
 %%                     ignore |
-%%                     {stop, Reason}
+%%                     {stop, StopReason}
 %% @end
 %%--------------------------------------------------------------------
--spec init([whapps_call:call()]) -> {'ok', state()}.
-init([Call]) ->
+init([Supervisor, Call]) ->
     whapps_call:put_callid(Call),
-    {'ok', #state{call=Call}}.
+    {'ok', 'build', #state{call=Call
+                           ,call_id=whapps_call:call_id(Call)
+                           ,supervisor=Supervisor
+                          }}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling call messages
+%% There should be one instance of this function for each possible
+%% state name. Whenever a gen_fsm receives an event sent using
+%% gen_fsm:send_event/2, the instance of this function with the same
+%% name as the current state name StateName is called to handle
+%% the event. It is also called if a timeout occurs.
 %%
-%% @spec handle_call(Request, From, State) ->
-%%                                   {reply, Reply, State} |
-%%                                   {reply, Reply, State, Timeout} |
-%%                                   {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, Reply, State} |
-%%                                   {stop, Reason, State}
+%% @spec state_name(Event, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    {'reply', {'error', 'not_implemented'}, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @spec handle_cast(Msg, State) -> {noreply, State} |
-%%                                  {noreply, State, Timeout} |
-%%                                  {stop, Reason, State}
-%% @end
-%%--------------------------------------------------------------------
-handle_cast('build_endpoints', #state{call=Call}=State) ->
+build({'listener', Listener}, State) ->
+    lager:debug("recv listener pid: ~p", [Listener]),
+    {'next_state', 'build', State#state{listener=Listener}};
+build('build_endpoints', #state{call=Call
+                                ,listener=Listener
+                               }=State) ->
     ToDID = wnm_util:to_e164(whapps_call:to_user(Call)),
 
-    lager:debug("finding number properties of ~s", [ToDID]),
+    lager:info("trying to build endpoint for ~s", [ToDID]),
     case build_endpoint(Call, ToDID) of
-        {'ok', Endpoints} ->
-            lager:debug("built endpoints: ~p", [Endpoints]),
-            gen_listener:cast(self(), 'bridge_to_endpoints'),
-            {'noreply', State#state{endpoints=Endpoints}};
+        {'ok', Endpoint, Failover} ->
+            lager:debug("built endpoint: ~p", [Endpoint]),
+            lager:debug("maybe build failover: ~p", [Failover]),
+            ts_offnet_listener:bridge(Listener, Endpoint),
+            {'next_state', 'ringing', State#state{failover=Failover}};
         {'error', 'no_endpoints'} ->
-            lager:debug("failed to find endpoints for ~s", [ToDID]),
-            whapps_call_command:hangup(Call),
-            {'stop', 'normal', State}
+            lager:info("failed to find endpoints for ~s", [ToDID]),
+            ts_offnet_listener:hangup(Listener),
+            {'next_state', 'build', State}
     end;
+build(_Evt, State) ->
+    lager:debug("unhandled message in build/2: ~p", [_Evt]),
+    {'next_state', 'build', State}.
 
-handle_cast('bridge_to_endpoints', #state{call=Call
-                                          ,endpoints=Endpoints
-                                         }=State) ->
-    lager:debug("trying to bridge to endpoints"),
-    whapps_call_command:bridge(Endpoints, Call),
-    {'noreply', State};
+build(_Evt, _From, State) ->
+    lager:debug("unhandled message in build/3: ~p", [_Evt]),
+    {'reply', {'error', 'unhandled'}, 'build', State}.
 
-%% Call Event handlers
-handle_cast({'channel_destroy', CallId}, #state{other_leg=CallId
-                                                ,call=Call
-                                               }=State) ->
-    lager:debug("recv channel destroy event for other leg ~s, done here", [CallId]),
-    whapps_call_command:hangup(Call),
-    {'noreply', State#state{other_leg='undefined'}};
-handle_cast({'channel_destroy', CallId}, State) ->
-    lager:debug("recv channel destroy event for ~s, done here", [CallId]),
+%% We are ringing an endpoint
+ringing({'leg_created', OtherLeg}, State) ->
+    lager:debug("other leg created: ~s", [OtherLeg]),
+    {'next_state', 'ringing', State#state{other_leg=OtherLeg}};
+ringing({'channel_bridged', OtherLeg}, #state{other_leg=OtherLeg}=State) ->
+    lager:info("successfully bridged to ~s", [OtherLeg]),
+    {'next_state', 'answered', State};
+ringing({'leg_destroyed', OtherLeg, _Reason}, #state{other_leg=OtherLeg
+                                                     ,failover='undefined'
+                                                     ,listener=Listener
+                                                    }=State) ->
+    lager:info("failed to answer with no failover ~s: ~s", [OtherLeg, _Reason]),
+    ts_offnet_listener:hangup(Listener),
+    {'next_state', 'finished', State#state{other_leg='undefined'}};
+ringing({'leg_destroyed', OtherLeg, _Reason}, #state{other_leg=OtherLeg
+                                                     ,failover=Failover
+                                                     ,listener=Listener
+                                                    }=State) ->
+    lager:info("failed to answer ~s: ~s", [OtherLeg, _Reason]),
+    lager:info("trying failover route: ~p", [Failover]),
+    ts_offnet_listener:bridge(Listener, Failover),
+    {'next_state', 'ringing', State#state{other_leg='undefined'}};
+ringing(_Evt, State) ->
+    lager:debug("unhandled message in ringing/2: ~p", [_Evt]),
+    {'next_state', 'ringing', State}.
+
+ringing(_Evt, _From, State) ->
+    lager:debug("unhandled message in ringing/3: ~p", [_Evt]),
+    {'reply', {'error', 'unhandled'}, 'ringing', State}.
+
+%% The endpoint has answered
+answered({'leg_destroyed', OtherLeg, _Reason}, #state{other_leg=OtherLeg
+                                                      ,listener=Listener
+                                                     }=State) ->
+    lager:debug("done after other leg ~s was destroyed: ~s", [OtherLeg, _Reason]),
+    ts_offnet_listener:hangup(Listener),
+    {'next_state', 'finished', State#state{other_leg='undeifned'}};
+answered({'channel_destroy', CallId}, #state{call_id=CallId}=State) ->
+    lager:debug("recv destroy for ~s", [CallId]),
     {'stop', 'normal', State};
-handle_cast({'channel_bridged', OtherLeg}, State) ->
-    lager:debug("bridged to leg ~s", [OtherLeg]),
-    {'noreply', State#state{other_leg=OtherLeg}};
-handle_cast({'leg_created', OtherLeg}, #state{other_leg='undefined'}=State) ->
-    lager:debug("other leg ~s created", [OtherLeg]),
-    {'noreply', State#state{other_leg=OtherLeg}};
-handle_cast({'leg_destroyed', OtherLeg}, #state{other_leg=OtherLeg
-                                                ,call=Call
-                                               }=State) ->
-    lager:debug("other leg ~s destroyed", [OtherLeg]),
-    whapps_call_command:hangup(Call),
-    {'noreply', State#state{other_leg='undefined'}};
+answered(_Evt, State) ->
+    lager:debug("unhandled message in answered/2: ~p", [_Evt]),
+    {'next_state', 'answered', State}.
 
-handle_cast({'wh_amqp_channel',{'new_channel',_IsNew}}, State) ->
-    {'noreply', State};
-handle_cast({'gen_listener',{'created_queue', QueueName}}, #state{call=Call}=State) ->
-    {'noreply', State#state{call=whapps_call:set_controller_queue(QueueName, Call)}};
-handle_cast({'gen_listener',{'is_consuming','true'}}, State) ->
-    lager:debug("started consuming, build endpoints"),
-    gen_listener:cast(self(), 'build_endpoints'),
-    {'noreply', State};
-handle_cast({'gen_listener',{'is_consuming','false'}}, State) ->
-    lager:debug("stopped consuming, what do?"),
-    {'noreply', State};
+answered(_Evt, _From, State) ->
+    lager:debug("unhandled message in answered/3: ~p", [_Evt]),
+    {'reply', {'error', 'unhandled'}, 'answered', State}.
 
-handle_cast(_Msg, State) ->
-    lager:debug("unhandled cast: ~p", [_Msg]),
-    {'noreply', State}.
+%% The call has finished
+finished({'channel_destroy', CallId}, #state{call_id=CallId}=State) ->
+    lager:debug("channel ~s destroyed", [CallId]),
+    {'stop', 'normal', State};
+finished(_Evt, State) ->
+    lager:debug("unhandled message in finished/2: ~p", [_Evt]),
+    {'next_state', 'finished', State}.
+
+finished(_Evt, _From, State) ->
+    lager:debug("unhandled message in finished/3: ~p", [_Evt]),
+    {'reply', {'error', 'unhandled'}, 'finished', State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling all non call/cast messages
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:send_all_state_event/2, this function is called to handle
+%% the event.
 %%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
+%% @spec handle_event(Event, StateName, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
-    {'noreply', State}.
+handle_event(_Event, StateName, State) ->
+    lager:debug("unhandled evt in ~s: ~p", [StateName, _Event]),
+    {'next_state', StateName, State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Allows listener to pass options to handlers
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
+%% to handle the event.
 %%
-%% @spec handle_event(JObj, State) -> {reply, Options}
+%% @spec handle_sync_event(Event, From, StateName, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {reply, Reply, NextStateName, NextState} |
+%%                   {reply, Reply, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState} |
+%%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_event(_JObj, _State) ->
-    {'reply', []}.
+handle_sync_event(_Event, _From, StateName, State) ->
+    lager:debug("unhandled sync_evt in ~s: ~p", [StateName, _Event]),
+    {'reply', {'error', 'unhandled'}, StateName, State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_server when it is about to
+%% This function is called by a gen_fsm when it receives any
+%% message other than a synchronous or asynchronous event
+%% (or a system message).
+%%
+%% @spec handle_info(Info,StateName,State)->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
+%% @end
+%%--------------------------------------------------------------------
+handle_info(_Info, StateName, State) ->
+    lager:debug("unhandled info in ~s: ~p", [StateName, _Info]),
+    {'next_state', StateName, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_fsm when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
+%% necessary cleaning up. When it returns, the gen_fsm terminates with
+%% Reason. The return value is ignored.
 %%
-%% @spec terminate(Reason, State) -> void()
+%% @spec terminate(Reason, StateName, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
-    lager:debug("listener terminating: ~p", [_Reason]).
+terminate(_Reason, _StateName, #state{supervisor=Supervisor}) ->
+    _ = spawn('ts_offnet_sup', 'stop', [Supervisor]),
+    lager:debug("terminating while in state ~s: ~p", [_StateName, _Reason]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Convert process state when code is changed
 %%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% @spec code_change(OldVsn, StateName, State, Extra) ->
+%%                   {ok, StateName, NewState}
 %% @end
 %%--------------------------------------------------------------------
-code_change(_OldVsn, State, _Extra) ->
-    {'ok', State}.
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {'ok', StateName, State}.
 
 %%%===================================================================
 %%% Internal functions
@@ -264,14 +294,16 @@ build_endpoint(_Call, ToDID) ->
             InFormat = props:get_value(<<"Invite-Format">>, RoutingData, <<"username">>),
             Invite = ts_util:invite_format(wh_util:to_lower_binary(InFormat), ToDID) ++ RoutingData,
 
-            {'ok', [wh_json:from_list([{<<"Custom-Channel-Vars">>, wh_json:from_list([{<<"Auth-User">>, AuthUser}
-                                                                                     ,{<<"Auth-Realm">>, AuthRealm}
-                                                                                     ,{<<"Direction">>, <<"inbound">>}
-                                                                                     ,{<<"Account-ID">>, AccountId}
-                                                                                    ])
-                                      }
-                                      | Invite
-                                     ])]
+            {'ok'
+             ,wh_json:from_list([{<<"Custom-Channel-Vars">>, wh_json:from_list([{<<"Auth-User">>, AuthUser}
+                                                                                ,{<<"Auth-Realm">>, AuthRealm}
+                                                                                ,{<<"Direction">>, <<"inbound">>}
+                                                                                ,{<<"Account-ID">>, AccountId}
+                                                                               ])
+                                 }
+                                 | Invite
+                                ])
+             ,props:get_value(<<"Failover">>, RoutingData)
             };
         {'error', _E} ->
             lager:debug("failed to find number properties for ~s: ~p", [ToDID, _E]),
