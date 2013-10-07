@@ -89,7 +89,7 @@ lookup_did(DID, AcctID) ->
             case couch_mgr:get_results(AcctDB, ?TS_VIEW_DIDLOOKUP, Options) of
                 {'ok', []} -> {'error', 'no_did_found'};
                 {'ok', [ViewJObj]} ->
-                    lager:info("found result with id ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
+                    lager:info("found result with id ~s in ~s", [DID, wh_json:get_value(<<"id">>, ViewJObj)]),
                     ValueJObj = wh_json:get_value(<<"value">>, ViewJObj),
                     Resp = wh_json:set_value(<<"id">>, wh_json:get_value(<<"id">>, ViewJObj), ValueJObj),
                     wh_cache:store_local(?TS_CACHE, {'lookup_did', DID, AcctID}, Resp),
