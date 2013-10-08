@@ -1133,15 +1133,30 @@ compact_shards(AdminConn, Ss, DDs) ->
     PR.
 
 wait_for_pids(_, []) -> lager:debug("done waiting for compaction pids");
-wait_for_pids(MaxWait, [{P,Ref}|Ps]) ->
-    lager:debug("waiting ~p for compaction pid ~p(~p)", [MaxWait, P, Ref]),
+wait_for_pids(MaxWait, [{P,Ref}|Ps]=PidRefs) ->
+    MaxWaitTimeout = max_wait_timeout(MaxWait),
+    lager:debug("waiting ~p(~p) for compaction pid ~p(~p)", [MaxWait, MaxWaitTimeout, P, Ref]),
     receive {'DOWN', Ref, 'process', P, _} ->
             lager:debug("recv down from ~p(~p)", [P, Ref]),
             wait_for_pids(MaxWait, Ps)
-    after MaxWait ->
-            lager:debug("timed out waiting for ~p(~p), moving on", [P, Ref]),
-            wait_for_pids(MaxWait, Ps)
+    after MaxWaitTimeout ->
+            case MaxWait of
+                'infinity' ->
+                    case erlang:is_process_alive(P) of
+                        'true' -> wait_for_pids(MaxWait, PidRefs);
+                        'false' ->
+                            lager:debug("missed ~p(~p) going down, moving along", [P, Ref]),
+                            wait_for_pids(MaxWait, Ps)
+                    end;
+                _ ->
+                    lager:debug("timed out waiting for ~p(~p), moving on", [P, Ref]),
+                    wait_for_pids(MaxWait, Ps)
+            end
     end.
+
+-spec max_wait_timeout(wh_timeout()) -> pos_integer().
+max_wait_timeout('infinity') -> 10000;
+max_wait_timeout(N) when is_integer(N) -> N.
 
 compact_shard(AdminConn, S, DDs) ->
     put('callid', 'compact_shard'),
@@ -1211,6 +1226,7 @@ wait_for_design_compaction(AdminConn, Shard, DDs, _DD, {'error', _E}) ->
 wait_for_design_compaction(AdminConn, Shard, DDs, DD, {'ok', DesignInfo}) ->
     case wh_json:is_true(<<"compact_running">>, DesignInfo, 'false') of
         'false' ->
+            lager:debug("compaction finished for design doc ~s", [DD]),
             wait_for_design_compaction(AdminConn, Shard, DDs);
         'true' ->
             'ok' = timer:sleep(?SLEEP_BETWEEN_POLL),
