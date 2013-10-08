@@ -125,7 +125,9 @@ build('build_endpoints', #state{call=Call
             lager:debug("built endpoint: ~p", [Endpoint]),
             lager:debug("maybe build failover: ~p", [Failover]),
             ts_offnet_listener:bridge(Listener, Endpoint),
-            {'next_state', 'ringing', State#state{failover=Failover}};
+            {'next_state', 'ringing', State#state{endpoint=Endpoint
+                                                  ,failover=Failover
+                                                 }};
         {'error', 'no_endpoints'} ->
             lager:info("failed to find endpoints for ~s", [ToDID]),
             ts_offnet_listener:hangup(Listener),
@@ -154,13 +156,67 @@ ringing({'leg_destroyed', OtherLeg, _Reason}, #state{other_leg=OtherLeg
     ts_offnet_listener:hangup(Listener),
     {'next_state', 'finished', State#state{other_leg='undefined'}};
 ringing({'leg_destroyed', OtherLeg, _Reason}, #state{other_leg=OtherLeg
+                                                     ,endpoint=Endpoint
                                                      ,failover=Failover
                                                      ,listener=Listener
+                                                     ,call=Call
                                                     }=State) ->
     lager:info("failed to answer ~s: ~s", [OtherLeg, _Reason]),
     lager:info("trying failover route: ~p", [Failover]),
-    ts_offnet_listener:bridge(Listener, Failover),
-    {'next_state', 'ringing', State#state{other_leg='undefined'}};
+    ts_offnet_listener:bridge(Listener, build_failover(Call, Failover, Endpoint)),
+    {'next_state', 'ringing', State#state{other_leg='undefined'
+                                          ,failover='undefined'
+                                          ,endpoint='undefined'
+                                         }};
+ringing({'dialplan_error', <<"bridge">>, _Reason}, #state{failover='undefined'
+                                                          ,listener=Listener
+                                                         }=State) ->
+    lager:debug("dialing error with no failover: ~s", [_Reason]),
+    ts_offnet_listener:hangup(Listener),
+    {'next_state', 'finished', State#state{other_leg='undefined'}};
+ringing({'dialplan_error', <<"bridge">>, _Reason}, #state{endpoint=Endpoint
+                                                          ,failover=Failover
+                                                          ,listener=Listener
+                                                          ,call=Call
+                                                         }=State) ->
+    lager:debug("dialing error with failover: ~s", [_Reason]),
+    ts_offnet_listener:bridge(Listener, build_failover(Call, Failover, Endpoint)),
+    {'next_state', 'ringing', State#state{other_leg='undefined'
+                                          ,failover='undefined'
+                                          ,endpoint='undefined'
+                                         }};
+ringing({'channel_destroy', CallId}, #state{call_id=CallId}=State) ->
+    lager:debug("recv destroy for ~s", [CallId]),
+    {'stop', 'normal', State};
+ringing({'offnet_resp', RespMessage, RespCode}, #state{failover='undefined'
+                                                       ,listener=Listener
+                                                      }=State) ->
+    case is_failure_response(RespMessage, RespCode) of
+        'true' ->
+            lager:debug("offnet error with no failover: ~s(~s)", [RespMessage, RespCode]),
+            ts_offnet_listener:hangup(Listener),
+            {'next_state', 'finished', State#state{other_leg='undefined'}};
+        'false' ->
+            lager:debug("successful offnet resp: ~s(~s)", [RespMessage, RespCode]),
+            {'next_state', 'ringing', State}
+    end;
+ringing({'offnet_resp', RespMessage, RespCode}, #state{endpoint=Endpoint
+                                                       ,failover=Failover
+                                                       ,listener=Listener
+                                                       ,call=Call
+                                                      }=State) ->
+    case is_failure_response(RespMessage, RespCode) of
+        'true' ->
+            lager:debug("offnet error with failover: ~s(~s)", [RespMessage, RespCode]),
+            ts_offnet_listener:bridge(Listener, build_failover(Call, Failover, Endpoint)),
+            {'next_state', 'ringing', State#state{other_leg='undefined'
+                                                  ,failover='undefined'
+                                                  ,endpoint='undefined'
+                                                 }};
+        'false' ->
+            lager:debug("successful offnet resp: ~s(~s)", [RespMessage, RespCode]),
+            {'next_state', 'ringing', State}
+    end;
 ringing(_Evt, State) ->
     lager:debug("unhandled message in ringing/2: ~p", [_Evt]),
     {'next_state', 'ringing', State}.
@@ -283,43 +339,52 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-build_endpoint(_Call, ToDID) ->
+build_endpoint(Call, ToDID) ->
     case wh_number_manager:lookup_account_by_number(ToDID) of
         {'ok', AccountId, _NumberProps} ->
             lager:debug("found number properties for ~s(~s)", [ToDID, AccountId]),
-            RoutingData = routing_data(ToDID, AccountId),
-            AuthUser = props:get_value(<<"To-User">>, RoutingData),
-            AuthRealm = props:get_value(<<"To-Realm">>, RoutingData),
-
-            InFormat = props:get_value(<<"Invite-Format">>, RoutingData, <<"username">>),
-            Invite = ts_util:invite_format(wh_util:to_lower_binary(InFormat), ToDID) ++ RoutingData,
-
-            {'ok'
-             ,wh_json:from_list([{<<"Custom-Channel-Vars">>, wh_json:from_list([{<<"Auth-User">>, AuthUser}
-                                                                                ,{<<"Auth-Realm">>, AuthRealm}
-                                                                                ,{<<"Direction">>, <<"inbound">>}
-                                                                                ,{<<"Account-ID">>, AccountId}
-                                                                               ])
-                                 }
-                                 | Invite
-                                ])
-             ,props:get_value(<<"Failover">>, RoutingData)
-            };
+            lager:debug("number props: ~p", [_NumberProps]),
+            try routing_data(ToDID, AccountId) of
+                RoutingData -> build_endpoint(Call, ToDID, AccountId, RoutingData)
+            catch
+                _E:_R ->
+                    lager:debug("failed to build routing data: ~s: ~p", [_E, _R]),
+                    {'error', 'no_endpoints'}
+            end;
         {'error', _E} ->
             lager:debug("failed to find number properties for ~s: ~p", [ToDID, _E]),
             {'error', 'no_endpoints'}
     end.
 
+build_endpoint(_Call, ToDID, AccountId, RoutingData) ->
+    AuthUser = props:get_value(<<"To-User">>, RoutingData),
+    AuthRealm = props:get_value(<<"To-Realm">>, RoutingData),
+
+    InFormat = props:get_value(<<"Invite-Format">>, RoutingData, <<"username">>),
+    Invite = ts_util:invite_format(wh_util:to_lower_binary(InFormat), ToDID) ++ RoutingData,
+
+    {'ok'
+     ,wh_json:from_list([{<<"Custom-Channel-Vars">>, wh_json:from_list([{<<"Auth-User">>, AuthUser}
+                                                                        ,{<<"Auth-Realm">>, AuthRealm}
+                                                                        ,{<<"Direction">>, <<"inbound">>}
+                                                                        ,{<<"Account-ID">>, AccountId}
+                                                                       ])
+                         }
+                         | Invite
+                        ])
+     ,props:get_value(<<"Failover">>, RoutingData)
+    }.
+
 -spec routing_data(ne_binary(), ne_binary()) -> wh_proplist().
 -spec routing_data(ne_binary(), ne_binary(), wh_json:object()) -> wh_proplist().
 routing_data(ToDID, AcctID) ->
     case ts_util:lookup_did(ToDID, AcctID) of
-        {ok, Settings} ->
+        {'ok', Settings} ->
             lager:info("got settings for DID ~s", [ToDID]),
             routing_data(ToDID, AcctID, Settings);
-        {error, no_did_found} ->
+        {'error', 'no_did_found'} ->
             lager:info("DID ~s not found in ~s", [ToDID, AcctID]),
-            throw(no_did_found)
+            []
     end.
 
 routing_data(ToDID, AcctID, Settings) ->
@@ -329,32 +394,29 @@ routing_data(ToDID, AcctID, Settings) ->
     RouteOpts = wh_json:get_value(<<"options">>, DIDOptions, []),
 
     NumConfig = case wh_number_manager:get_public_fields(ToDID, AcctID) of
-                    {ok, Fields} -> Fields;
-                    {error, _} -> wh_json:new()
+                    {'ok', Fields} -> Fields;
+                    {'error', _} -> wh_json:new()
                 end,
 
     AuthU = wh_json:get_value(<<"auth_user">>, AuthOpts),
     AuthR = wh_json:get_value(<<"auth_realm">>, AuthOpts, wh_json:get_value(<<"auth_realm">>, Acct)),
 
-    {Srv, AcctStuff} = try
-                           {ok, AccountSettings} = ts_util:lookup_user_flags(AuthU, AuthR, AcctID),
-                           lager:info("got account settings"),
-                           {
-                             wh_json:get_value(<<"server">>, AccountSettings, wh_json:new())
-                             ,wh_json:get_value(<<"account">>, AccountSettings, wh_json:new())
-                           }
-                       catch
-                           _A:_B ->
-                               lager:info("failed to get account settings: ~p: ~p", [_A, _B]),
-                               {wh_json:new(), wh_json:new()}
-                       end,
+    {Srv, AcctStuff} =
+        try ts_util:lookup_user_flags(AuthU, AuthR, AcctID) of
+            {'ok', AccountSettings} ->
+                lager:info("got account settings"),
+                {
+                  wh_json:get_value(<<"server">>, AccountSettings, wh_json:new())
+                  ,wh_json:get_value(<<"account">>, AccountSettings, wh_json:new())
+                }
+        catch
+            _A:_B ->
+                lager:info("failed to get account settings: ~p: ~p", [_A, _B]),
+                {wh_json:new(), wh_json:new()}
+        end,
 
     SrvOptions = wh_json:get_value(<<"options">>, Srv, wh_json:new()),
-
-    case wh_util:is_true(wh_json:get_value(<<"enabled">>, SrvOptions)) of
-        false -> throw({server_disabled, wh_json:get_value(<<"id">>, Srv)});
-        true -> ok
-    end,
+    'true' = wh_json:is_true(<<"enabled">>, SrvOptions),
 
     InboundFormat = wh_json:get_value(<<"inbound_format">>, SrvOptions, <<"npan">>),
 
@@ -429,21 +491,70 @@ routing_data(ToDID, AcctID, Settings) ->
                          ,{<<"To-DID">>, ToDID}
                          ,{<<"Route-Options">>, RouteOpts}
                        ],
-           V =/= undefined,
+           V =/= 'undefined',
            V =/= <<>>
     ].
 
-callee_id([]) -> {undefined, undefined};
-callee_id([undefined | T]) -> callee_id(T);
+callee_id([]) -> {'undefined', 'undefined'};
+callee_id(['undefined' | T]) -> callee_id(T);
 callee_id([<<>> | T]) -> callee_id(T);
 callee_id([JObj | T]) ->
     case wh_json:is_json_object(JObj) andalso (not wh_json:is_empty(JObj)) of
-        true ->
+        'false' -> callee_id(T);
+        'true' ->
             case {wh_json:get_value(<<"cid_name">>, JObj), wh_json:get_value(<<"cid_number">>, JObj)} of
-                {undefined, undefined} ->
+                {'undefined', 'undefined'} ->
                     callee_id(T);
                 CalleeID -> CalleeID
-            end;
-        false ->
-            callee_id(T)
+            end
     end.
+
+-spec build_failover(whapps_call:call(), api_object(), wh_json:object()) ->
+                            {'sip', wh_json:object()} |
+                            {'e164', wh_json:object()} |
+                            {'error', 'no_endpoints'}.
+build_failover(Call, Failover, Endpoint) ->
+    case wh_json:get_value(<<"e164">>, Failover) of
+        'undefined' -> maybe_build_sip_failover(Call, wh_json:get_value(<<"sip">>, Failover));
+        DID -> build_e164_failover(Call, DID, Endpoint)
+    end.
+
+maybe_build_sip_failover(_, 'undefined') -> {'error', 'no_endpoints'};
+maybe_build_sip_failover(Call, SIPRoute) ->
+    lager:info("building SIP failover to ~s", [SIPRoute]),
+
+    {'sip', wh_json:from_list(
+              props:filter_undefined(
+                [{<<"Invite-Format">>, <<"route">>}
+                 ,{<<"Route">>, SIPRoute}
+                 ,{<<"Caller-ID-Name">>, whapps_call:caller_id_name(Call)}
+                 ,{<<"Caller-ID-Number">>, whapps_call:caller_id_number(Call)}
+                ]))}.
+
+build_e164_failover(Call, ToDID, EP) ->
+    {'e164', wh_json:from_list(
+               props:filter_undefined(
+                 [{<<"Call-ID">>, whapps_call:call_id(Call)}
+                  ,{<<"Resource-Type">>, <<"audio">>}
+                  ,{<<"To-DID">>, ToDID}
+                  ,{<<"Account-ID">>, whapps_call:account_id(Call)}
+                  ,{<<"Control-Queue">>, whapps_call:control_queue(Call)}
+                  ,{<<"Application-Name">>, <<"bridge">>}
+                  ,{<<"Custom-Channel-Vars">>, wh_json:from_list([{<<"Inception">>, <<"off-net">>}
+                                                                  ,{<<"Account-ID">>, whapps_call:account_id(Call)}
+                                                                 ])}
+                  ,{<<"Flags">>, wh_json:get_value(<<"flags">>, EP)}
+                  ,{<<"Timeout">>, wh_json:get_value(<<"timeout">>, EP)}
+                  ,{<<"Ignore-Early-Media">>, wh_json:get_value(<<"ignore_early_media">>, EP)}
+                  ,{<<"Outbound-Caller-ID-Name">>, whapps_call:caller_id_name(Call)}
+                  ,{<<"Outbound-Caller-ID-Number">>, whapps_call:caller_id_number(Call)}
+                  ,{<<"Caller-ID-Name">>, whapps_call:caller_id_name(Call)}
+                  ,{<<"Caller-ID-Number">>, whapps_call:caller_id_number(Call)}
+                  ,{<<"Ringback">>, wh_json:get_value(<<"ringback">>, EP)}
+                  | wh_api:default_headers(?APP_NAME, ?APP_VERSION)
+                 ]))}.
+
+-spec is_failure_response(ne_binary(), ne_binary()) -> boolean().
+is_failure_response(<<"SUCCESS">>, _) -> 'false';
+is_failure_response(_RespMessage, _RespCode) ->
+    'true'.

@@ -30,6 +30,7 @@
 -record(state, {call :: whapps_call:call()
                 ,supervisor :: pid()
                 ,fsm :: pid()
+                ,call_status_ref :: reference()
                }).
 -type state() :: #state{}.
 
@@ -42,6 +43,9 @@
 -define(QUEUE_NAME, <<>>).
 -define(QUEUE_OPTIONS, []).
 -define(CONSUME_OPTIONS, []).
+
+-define(CALL_STATUS_MSG, 'check_call_status').
+-define(CALL_STATUS_TIMEOUT, whapps_config:get_integer(?APP_NAME, <<"call_status_timeout_ms">>, 5000)).
 
 %%%===================================================================
 %%% API
@@ -74,24 +78,55 @@ events(JObj, Props) ->
     events(JObj, Props, wh_util:get_event_type(JObj)).
 
 events(JObj, Props, {<<"call_event">>, <<"CHANNEL_DESTROY">>}) ->
+    'true' = wapi_call:event_v(JObj),
     Evt = {'channel_destroy', wh_json:get_value(<<"Call-ID">>, JObj)},
     gen_listener:cast(props:get_value('server', Props), Evt),
     ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
 events(JObj, Props, {<<"call_event">>, <<"CHANNEL_BRIDGE">>}) ->
+    'true' = wapi_call:event_v(JObj),
     Evt = {'channel_bridged', wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)},
     ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
 events(JObj, Props, {<<"call_event">>, <<"LEG_CREATED">>}) ->
+    'true' = wapi_call:event_v(JObj),
     Evt = {'leg_created', wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)},
     ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
 events(JObj, Props, {<<"call_event">>, <<"LEG_DESTROYED">>}) ->
+    'true' = wapi_call:event_v(JObj),
     Evt = {'leg_destroyed'
            ,wh_json:get_value(<<"Other-Leg-Unique-ID">>, JObj)
            ,wh_json:get_value(<<"Hangup-Cause">>, JObj)
           },
     ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
+events(JObj, Props, {<<"call_event">>,<<"channel_status_resp">>}) ->
+    'true' = wapi_call:channel_status_resp_v(JObj),
+    case wh_json:get_value(<<"Status">>, JObj) of
+        <<"terminated">> ->
+            lager:debug("channel is terminated"),
+            Evt = {'channel_destroy', wh_json:get_value(<<"Call-ID">>, JObj)},
+            gen_listener:cast(props:get_value('server', Props), Evt),
+            ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
+        _ -> 'ok'
+    end;
+events(JObj, Props, {<<"error">>,<<"dialplan">>}) ->
+    Evt = {'dialplan_error'
+           ,wh_json:get_value([<<"Request">>, <<"Application-Name">>], JObj)
+           ,wh_json:get_value([<<"Error-Message">>], JObj)
+          },
+    ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
+events(JObj, Props, {<<"resource">>,<<"offnet_resp">>}) ->
+    'true' = wapi_offnet_resource:resp_v(JObj),
+    Evt = {'offnet_resp'
+           ,wh_json:get_value(<<"Response-Message">>, JObj)
+           ,wh_json:get_value(<<"Response-Code">>, JObj)
+          },
+    ts_offnet_fsm:call_event(props:get_value('fsm', Props), Evt);
 events(_JObj, _Props, _Evt) ->
     lager:debug("recv unhandled event: ~p", [_Evt]).
 
+bridge(Listener, {'sip', Endpoint}) ->
+    gen_listener:cast(Listener, {'bridge_to_endpoint', Endpoint});
+bridge(Listener, {'e164', Endpoint}) ->
+    gen_listener:cast(Listener, {'bridge_to_offnet', Endpoint});
 bridge(Listener, Endpoint) ->
     gen_listener:cast(Listener, {'bridge_to_endpoint', Endpoint}).
 
@@ -118,7 +153,12 @@ init([Supervisor, Call]) ->
     whapps_call:put_callid(Call),
     {'ok', #state{call=Call
                   ,supervisor=Supervisor
+                  ,call_status_ref=start_call_status_timer()
                  }}.
+
+-spec start_call_status_timer() -> reference().
+start_call_status_timer() ->
+    erlang:send_after(?CALL_STATUS_TIMEOUT, self(), ?CALL_STATUS_MSG).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -150,6 +190,14 @@ handle_call(_Request, _From, State) ->
 handle_cast({'bridge_to_endpoint', Endpoint}, #state{call=Call}=State) ->
     lager:info("trying to bridge to endpoints"),
     whapps_call_command:bridge([Endpoint], Call),
+    {'noreply', State};
+handle_cast({'bridge_to_offnet', Endpoint}, #state{call=Call}=State) ->
+    lager:info("trying to bridge to offnet"),
+    wapi_offnet_resource:publish_req(
+      wh_json:set_values([{<<"Server-ID">>, whapps_call:controller_queue(Call)}]
+                         ,Endpoint
+                        )
+     ),
     {'noreply', State};
 handle_cast('hangup', #state{call=Call}=State) ->
     lager:info("sending hangup to call"),
@@ -195,6 +243,9 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_info(?CALL_STATUS_MSG, #state{call=Call}=State) ->
+    whapps_call_command:channel_status(Call),
+    {'noreply', State#state{call_status_ref=start_call_status_timer()}};
 handle_info({'EXIT', _Pid, 'normal'}, State) ->
     {'noreply', State};
 handle_info(_Info, State) ->
