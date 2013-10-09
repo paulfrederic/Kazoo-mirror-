@@ -970,7 +970,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info('$maybe_start_auto_compaction_job', CurrentState, State) ->
-    maybe_start_auto_compaction_job(),
+    maybe_start_auto_compaction_job(CurrentState),
     {'next_state', CurrentState, State};
 handle_info({'DOWN', Ref, 'process', P, _Reason}, _StateName, #state{shards_pid_ref={P, Ref}
                                                                      ,next_compaction_msg=Msg
@@ -1334,6 +1334,8 @@ maybe_send_update(P, Ref, Update) when is_pid(P) ->
 maybe_send_update(_,_,_) -> 'ok'.
 
 maybe_start_auto_compaction_job() ->
+    maybe_start_auto_compaction_job('ready').
+maybe_start_auto_compaction_job('ready') ->
     case compact_automatically() andalso
         (catch wh_couch_connections:test_admin_conn())
     of
@@ -1342,7 +1344,10 @@ maybe_start_auto_compaction_job() ->
         _ ->
             erlang:send_after(?AUTOCOMPACTION_CHECK_TIMEOUT, self(), '$maybe_start_auto_compaction_job'),
             'ok'
-    end.
+    end;
+maybe_start_auto_compaction_job(_State) ->
+    erlang:send_after(?AUTOCOMPACTION_CHECK_TIMEOUT, self(), '$maybe_start_auto_compaction_job'),
+    lager:debug("not checking autocompaction since in state ~s, not 'ready'", [_State]).
 
 -spec queued_jobs_status(queue()) -> 'none' | [wh_proplist(),...].
 queued_jobs_status(Jobs) ->
