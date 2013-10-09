@@ -256,7 +256,7 @@ current() -> gen_fsm:sync_send_all_state_event(?SERVER, 'current').
 init([]) ->
     _ = random:seed(erlang:now()),
     put('callid', ?MODULE),
-    self() ! '$maybe_start_auto_compaction_job',
+    gen_fsm:send_event_after(?AUTOCOMPACTION_CHECK_TIMEOUT, '$maybe_start_auto_compaction_job'),
     {'ok', 'ready', #state{conn='undefined'
                            ,admin_conn='undefined'
                           }}.
@@ -520,6 +520,7 @@ compact({'compact_db', N, D}=Msg, #state{conn='undefined'
     end;
 
 compact('compact', #state{nodes=[]
+                          ,dbs=[]
                           ,current_job_pid=Pid
                           ,current_job_ref=Ref
                          }=State) ->
