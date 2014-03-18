@@ -858,7 +858,9 @@ collect_pin(Interdigit, Call, NoopId) ->
 %%--------------------------------------------------------------------
 -spec new_message(ne_binary(), pos_integer(), mailbox(), whapps_call:call()) -> any().
 new_message(AttachmentName, Length, #mailbox{mailbox_id=MailboxId
+                                             ,mailbox_number=BoxNum
                                              ,owner_id=OwnerId
+                                             ,timezone=Timezone
                                             }=Box, Call) ->
     lager:debug("saving new ~bms voicemail message and metadata", [Length]),
     UtcSeconds = wh_util:current_tstamp(),
@@ -898,7 +900,7 @@ new_message(AttachmentName, Length, #mailbox{mailbox_id=MailboxId
              ,{<<"to_user">>, whapps_call:to_user(Call)}
              ,{<<"to_realm">>, whapps_call:to_realm(Call)}
              ,{<<"caller_id_number">>, whapps_call:caller_id_number(Call)}
-             ,{<<"caller_id_name">> whapps_call:caller_id_name(Call)}
+             ,{<<"caller_id_name">>, whapps_call:caller_id_name(Call)}
              ,{<<"call_id">>, whapps_call:call_id(Call)}
 
              ,{<<"voicemail_box_id">>, MailboxId}
@@ -1284,7 +1286,7 @@ review_recording(AttachmentName, AllowOperator
 %%--------------------------------------------------------------------
 -spec store_recording(ne_binary(), wh_media:media(), whapps_call:call()) -> boolean().
 store_recording(AttachmentName, Media, Call) ->
-    lager:debug("storing recording ~s in doc ~s", [AttachmentName, DocId]),
+    lager:debug("storing recording ~s", [AttachmentName]),
     URL = wh_media:store_url(wh_media:prepare_store(Media)),
     _ = whapps_call_command:b_store(AttachmentName, URL, Call),
     verify_store_recording(wh_media:reload(Media), Call).
@@ -1303,7 +1305,7 @@ verify_store_recording(Media, Call) ->
     ContentLength = wh_media:content_length(Media),
     case ContentLength >= MinLength of
         'true' -> 'true';
-        'false' -> 
+        'false' ->
             lager:info("attachment length is ~B and must be larger than ~B to be stored"
                        ,[ContentLength, MinLength]),
             wh_media:delete(Media),
