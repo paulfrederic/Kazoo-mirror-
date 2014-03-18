@@ -67,6 +67,8 @@
 
          %% Special accessors
          ,req_value/2, req_value/3
+
+         ,success_updaters/2
         ]).
 
 -include("./crossbar.hrl").
@@ -538,3 +540,86 @@ add_depreciated_validation_error(Property, Code, Message, #cb_context{validation
                        ,resp_data=wh_json:new()
                        ,resp_error_msg = <<"invalid data">>
                       }.
+
+%%--------------------------------------------------------------------
+%% @public
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec success_updaters(wh_json:object() | wh_json:objects(), context()) -> context().
+success_updaters([], Context) -> handle_thing_success([], Context);
+success_updaters([JObj|_]=JObjs, Context) ->
+    case wh_json:is_json_object(JObj) of
+        'true' -> handle_json_success(JObjs, Context);
+        'false' -> handle_thing_success(JObjs, Context)
+    end;
+success_updaters(JObj, Context) ->
+    case wh_json:is_json_object(JObj) of
+        'true' -> handle_json_success(JObj, Context);
+        'false' -> handle_thing_success(JObj, Context)
+    end.
+
+-spec handle_thing_success(term(), context()) -> context().
+handle_thing_success(Thing, Context) ->
+    lists:foldl(fun fold_success_updaters/2
+                ,Context
+                ,[{fun set_doc/2, Thing}
+                  ,{fun set_resp_status/2, 'success'}
+                  ,{fun set_resp_data/2, Thing}
+                  ,{fun set_resp_etag/2, 'undefined'}
+                 ]).
+
+-spec handle_json_success(wh_json:object() | wh_json:objects(), context()) -> context().
+handle_json_success([_|_]=JObjs, #cb_context{req_verb = ?HTTP_PUT}=Context) ->
+    RespData = [wh_json:public_fields(JObj)
+                || JObj <- JObjs,
+                   wh_json:is_false(<<"pvt_deleted">>, JObj, 'true')
+               ],
+    RespHeaders = [{<<"Location">>, wh_json:get_value(<<"_id">>, JObj)}
+                   || JObj <- JObjs
+                  ] ++ resp_headers(Context),
+    lists:foldl(fun fold_success_updaters/2
+                ,Context
+                ,[{fun set_doc/2, JObjs}
+                  ,{fun set_resp_status/2, 'success'}
+                  ,{fun set_resp_data/2, RespData}
+                  ,{fun set_resp_etag/2, crossbar_doc:rev_to_etag(JObjs)}
+                  ,{fun set_resp_headers/2, RespHeaders}
+                 ]);
+handle_json_success([_|_]=JObjs, Context) ->
+    RespData = [wh_json:public_fields(JObj)
+                || JObj <- JObjs,
+                   wh_json:is_false(<<"pvt_deleted">>, JObj, 'true')
+               ],
+    lists:foldl(fun fold_success_updaters/2
+                ,Context
+                ,[{fun set_doc/2, JObjs}
+                  ,{fun set_resp_status/2, 'success'}
+                  ,{fun set_resp_data/2, RespData}
+                  ,{fun set_resp_etag/2, crossbar_doc:rev_to_etag(JObjs)}
+                 ]);
+handle_json_success(JObj, #cb_context{req_verb = ?HTTP_PUT}=Context) ->
+    RespHeaders = [{<<"Location">>, wh_json:get_value(<<"_id">>, JObj)}
+                   | resp_headers(Context)
+                  ],
+    lists:foldl(fun fold_success_updaters/2
+                ,Context
+                ,[{fun set_doc/2, JObj}
+                  ,{fun set_resp_status/2, 'success'}
+                  ,{fun set_resp_data/2, wh_json:public_fields(JObj)}
+                  ,{fun set_resp_etag/2, crossbar_doc:rev_to_etag(JObj)}
+                  ,{fun set_resp_headers/2, RespHeaders}
+                 ]);
+handle_json_success(JObj, Context) ->
+    lists:foldl(fun fold_success_updaters/2
+                ,Context
+                ,[{fun set_doc/2, JObj}
+                  ,{fun set_resp_status/2, 'success'}
+                  ,{fun set_resp_data/2, wh_json:public_fields(JObj)}
+                  ,{fun set_resp_etag/2, crossbar_doc:rev_to_etag(JObj)}
+                 ]).
+
+-spec fold_success_updaters({setter_fun_2(), term()}, context()) -> context().
+fold_success_updaters({F, D}, C) -> F(C, D).
+

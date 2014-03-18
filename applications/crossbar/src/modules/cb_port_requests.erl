@@ -519,7 +519,7 @@ read_descendants(Context, SubAccounts) ->
                                           PortRequests = read_descendant(Context, AccountId),
                                           wh_json:set_value(AccountId, PortRequests, Acc)
                                   end, wh_json:new(), SubAccounts),
-    crossbar_doc:handle_json_success(AllPortRequests, Context).
+    cb_context:success_updaters(AllPortRequests, Context).
 
 -spec read_descendant(cb_context:context(), ne_binary()) -> wh_json:object().
 read_descendant(Context, Id) ->

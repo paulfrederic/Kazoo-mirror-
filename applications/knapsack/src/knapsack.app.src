@@ -1,0 +1,13 @@
+{application, knapsack,
+ [
+  {description, "Knapsack - a module to use external storage systems (dropbox, S3, ect)"},
+  {vsn, "0.0.1"},
+  {modules, []},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { knapsack_app, []}},
+  {env, []}
+ ]}.

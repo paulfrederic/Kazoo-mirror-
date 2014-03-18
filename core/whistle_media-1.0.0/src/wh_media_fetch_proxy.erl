@@ -6,6 +6,6 @@
 %%% @contributors
 %%%
 %%%-------------------------------------------------------------------
--module(wh_media_store_proxy).
+-module(wh_media_fetch_proxy).
 
 -include("whistle_media.hrl").

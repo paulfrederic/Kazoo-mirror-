@@ -6,6 +6,14 @@
 %%% @contributors
 %%%
 %%%-------------------------------------------------------------------
--module(wh_media_store_proxy).
+-module(wh_media_bigcouch).
+
+-export([fetch/1]).
 
 -include("whistle_media.hrl").
+
+fetch(Media) ->
+    
+
+content_type(Identifier) ->
+    

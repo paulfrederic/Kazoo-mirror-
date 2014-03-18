@@ -1,4 +1,4 @@
-PROJECT = whistle_media
+PROJECT = knapsack
 ROOT = ../..
 REBAR = $(ROOT)/utils/rebar/rebar
 DIALYZER = dialyzer
@@ -10,21 +10,20 @@ ERLC_OPTS = +debug_info +warn_export_all -I$(ROOT)/core -I$(ROOT)/deps $(PA)
      # +bin_opt_info
 
 DIRS =  . \
-	$(ROOT)/core/whistle-1.0.0 \
-	$(ROOT)/core/whistle_amqp-1.0.0 \
-	$(ROOT)/core/whistle_couch-1.0.0 \
-	$(ROOT)/core/whistle_apps
+    $(ROOT)/core/whistle-1.0.0 \
+    $(ROOT)/core/whistle_amqp-1.0.0 \
+    $(ROOT)/core/whistle_couch-1.0.0 \
+    $(ROOT)/core/whistle_apps-1.0.0
 
 .PHONY: all compile clean
 
 all: compile
 
 MODULES = $(shell ls src/*.erl | sed 's/src\///;s/\.erl/,/' | sed '$$s/.$$//')
-ENGINE_MODULES = $(shell ls src/engines/*.erl | sed 's/src\/engines\///;s/\.erl/,/' | sed '$$s/.$$//')
 
 compile: ebin/$(PROJECT).app
 	@cat src/$(PROJECT).app.src \
-		| sed 's/{modules, \[\]}/{modules, \[$(MODULES),$(ENGINE_MODULES)\]}/' \
+		| sed 's/{modules, \[\]}/{modules, \[$(MODULES)\]}/' \
 		> ebin/$(PROJECT).app
 	-@$(MAKE) ebin/$(PROJECT).app
 

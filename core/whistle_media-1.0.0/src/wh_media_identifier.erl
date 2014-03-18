@@ -6,6 +6,12 @@
 %%% @contributors
 %%%
 %%%-------------------------------------------------------------------
--module(wh_media_store_proxy).
+-module(wh_media_identifier).
+
+-export([basic/2]).
 
 -include("whistle_media.hrl").
+
+basic(Account, Id) ->
+    AccountDb = wh_util:format_account_id(Account, 'encoded'),
+    {AccountDb, Id}.

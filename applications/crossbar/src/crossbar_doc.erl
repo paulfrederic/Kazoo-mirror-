@@ -25,8 +25,6 @@
          ,update_pvt_parameters/2
         ]).
 
--export([handle_json_success/2]).
-
 -include("crossbar.hrl").
 
 -define(CROSSBAR_DOC_VSN, <<"1">>).
@@ -74,7 +72,7 @@ load(DocId, #cb_context{}=Context, Opts) when is_binary(DocId) ->
                        ),
             case wh_json:is_true(<<"pvt_deleted">>, JObj) of
                 'true' -> cb_context:add_system_error('bad_identifier', [{'details', DocId}],  Context);
-                'false' -> cb_context:store(handle_couch_mgr_success(JObj, Context), 'db_doc', JObj)
+                'false' -> cb_context:store(cb_context:success_updaters(JObj, Context), 'db_doc', JObj)
             end
     end;
 load([], Context, _) -> cb_context:add_system_error('bad_identifier',  Context);
@@ -82,7 +80,7 @@ load([_|_]=IDs, Context, Opts) ->
     Opts1 = [{'keys', IDs}, 'include_docs' | Opts],
     case couch_mgr:all_docs(cb_context:account_db(Context), Opts1) of
         {'error', Error} -> handle_couch_mgr_errors(Error, IDs, Context);
-        {'ok', JObjs} -> handle_couch_mgr_success(extract_included_docs(JObjs), Context)
+        {'ok', JObjs} -> cb_context:success_updaters(extract_included_docs(JObjs), Context)
     end.
 
 %%--------------------------------------------------------------------
@@ -129,13 +127,13 @@ load_merge(DocId, DataJObj, #cb_context{load_merge_bypass='undefined'}=Context) 
         _Status -> Context1
     end;
 load_merge(_, _, #cb_context{load_merge_bypass=JObj}=Context) ->
-    handle_couch_mgr_success(JObj, Context).
+    cb_context:success_updaters(JObj, Context).
 
 -spec merge(wh_json:object(), wh_json:object(), cb_context:context()) ->
                    cb_context:context().
 merge(DataJObj, JObj, Context) ->
     PrivJObj = wh_json:private_fields(JObj),
-    handle_couch_mgr_success(wh_json:merge_jobjs(PrivJObj, DataJObj), Context).
+    cb_context:success_updaters(wh_json:merge_jobjs(PrivJObj, DataJObj), Context).
 
 %%--------------------------------------------------------------------
 %% @public
@@ -170,10 +168,10 @@ load_view(View, Options, Context) ->
                         || JObj <- JObjs,
                            filter_doc(wh_json:get_value(<<"doc">>, JObj), QS)
                        ],
-            handle_couch_mgr_success(Filtered, Context);
+            cb_context:success_updaters(Filtered, Context);
         {'ok', JObjs} ->
             lager:debug("loaded view ~s from ~s", [View, Db]),
-            handle_couch_mgr_success(JObjs, Context)
+            cb_context:success_updaters(JObjs, Context)
     end.
 
 %%--------------------------------------------------------------------
@@ -196,7 +194,7 @@ load_view(View, Options, Context, Filter) when is_function(Filter, 2) ->
                         || JObj <- lists:foldl(Filter, [], cb_context:doc(Context1)),
                            (not wh_util:is_empty(JObj))
                        ],
-            handle_couch_mgr_success(Filtered, Context1);
+            cb_context:success_updaters(Filtered, Context1);
         Else -> Else
     end.
 
@@ -219,7 +217,7 @@ load_docs(#cb_context{}=Context, Filter) when is_function(Filter, 2) ->
                         || JObj <- lists:foldl(Filter, [], JObjs)
                                ,(not wh_util:is_empty(JObj))
                        ],
-            handle_couch_mgr_success(Filtered, Context)
+            cb_context:success_updaters(Filtered, Context)
     end.
 
 %%--------------------------------------------------------------------
@@ -294,7 +292,7 @@ save(Context, [_|_]=JObjs, Options) ->
             _ = [couch_mgr:flush_cache_doc(cb_context:account_db(Context), wh_json:get_value(<<"_id">>, JObj))
                  || JObj <- JObjs
                 ],
-            Context1 = handle_couch_mgr_success(JObj1, Context),
+            Context1 = cb_context:success_updaters(JObj1, Context),
             provisioner_util:maybe_send_contact_list(Context1)
     end;
 save(#cb_context{}=Context, JObj, Options) ->
@@ -305,7 +303,7 @@ save(#cb_context{}=Context, JObj, Options) ->
             handle_couch_mgr_errors(Error, DocId, Context);
         {'ok', JObj1} ->
             couch_mgr:flush_cache_doc(cb_context:account_db(Context), wh_json:get_value(<<"_id">>, JObj1)),
-            Context1 = handle_couch_mgr_success(JObj1, Context),
+            Context1 = cb_context:success_updaters(JObj1, Context),
             provisioner_util:maybe_send_contact_list(Context1)
     end.
 
@@ -336,7 +334,7 @@ ensure_saved(#cb_context{}=Context, JObj, Options) ->
             DocId = wh_json:get_value(<<"_id">>, JObj0),
             handle_couch_mgr_errors(Error, DocId, Context);
         {'ok', JObj1} ->
-            Context1 = handle_couch_mgr_success(JObj1, Context),
+            Context1 = cb_context:success_updaters(JObj1, Context),
             provisioner_util:maybe_send_contact_list(Context1)
     end.
 
@@ -409,7 +407,7 @@ delete(#cb_context{}=Context) ->
     JObj0 = cb_context:doc(Context),
     JObj1 = wh_json:set_value(<<"pvt_deleted">>, 'true', update_pvt_parameters(JObj0, Context)),
     case couch_mgr:save_doc(cb_context:account_db(Context), JObj1) of
-        {'error', 'not_found'} -> handle_couch_mgr_success(JObj0, Context);
+        {'error', 'not_found'} -> cb_context:success_updaters(JObj0, Context);
         {'error', Error} ->
             DocId = wh_json:get_value(<<"_id">>, JObj1),
             handle_couch_mgr_errors(Error, DocId, Context);
@@ -417,14 +415,14 @@ delete(#cb_context{}=Context) ->
             lager:debug("deleted ~s from ~s", [wh_json:get_value(<<"_id">>, JObj1)
                                                ,cb_context:account_db(Context)
                                               ]),
-            Context1 = handle_couch_mgr_success(JObj1, Context),
+            Context1 = cb_context:success_updaters(JObj1, Context),
             provisioner_util:maybe_send_contact_list(Context1)
     end.
 
 delete(#cb_context{}=Context, 'permanent') ->
     JObj0 = cb_context:doc(Context),
     case couch_mgr:del_doc(cb_context:account_db(Context), JObj0) of
-        {'error', 'not_found'} -> handle_couch_mgr_success(JObj0, Context);
+        {'error', 'not_found'} -> cb_context:success_updaters(JObj0, Context);
         {'error', Error} ->
             DocId = wh_json:get_value(<<"_id">>, JObj0),
             handle_couch_mgr_errors(Error, DocId, Context);
@@ -432,7 +430,7 @@ delete(#cb_context{}=Context, 'permanent') ->
             lager:debug("permanently deleted ~s from ~s"
                         ,[wh_json:get_value(<<"_id">>, JObj0), cb_context:account_db(Context)]
                        ),
-            Context1 = handle_couch_mgr_success(JObj0, Context),
+            Context1 = cb_context:success_updaters(JObj0, Context),
             provisioner_util:maybe_send_contact_list(Context1)
     end.
 
@@ -449,7 +447,7 @@ delete(#cb_context{}=Context, 'permanent') ->
                                cb_context:context().
 delete_attachment(DocId, AName, #cb_context{}=Context) ->
     case couch_mgr:delete_attachment(cb_context:account_db(Context), DocId, AName) of
-        {'error', 'not_found'} -> handle_couch_mgr_success(wh_json:new(), Context);
+        {'error', 'not_found'} -> cb_context:success_updaters(wh_json:new(), Context);
         {'error', Error} ->
             lager:debug("failed to delete attachment: ~p", [Error]),
             handle_couch_mgr_errors(Error, AName, Context);
@@ -457,7 +455,7 @@ delete_attachment(DocId, AName, #cb_context{}=Context) ->
             lager:debug("deleted attachment ~s from doc ~s from ~s"
                         ,[AName, DocId, cb_context:account_db(Context)]
                        ),
-            handle_couch_mgr_success(wh_json:new(), Context)
+            cb_context:success_updaters(wh_json:new(), Context)
     end.
 
 %%--------------------------------------------------------------------
@@ -476,90 +474,6 @@ rev_to_etag(JObj) ->
         'undefined' -> 'undefined';
         Rev -> wh_util:to_list(Rev)
     end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec handle_couch_mgr_success(wh_json:object() | wh_json:objects(), cb_context:context()) -> cb_context:context().
-handle_couch_mgr_success([], Context) ->
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, []}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, []}
-                  ,{fun cb_context:set_resp_etag/2, 'undefined'}
-                 ]);
-handle_couch_mgr_success([JObj|_]=JObjs, Context) ->
-    case wh_json:is_json_object(JObj) of
-        'true' -> handle_json_success(JObjs, Context);
-        'false' -> handle_thing_success(JObjs, Context)
-    end;
-handle_couch_mgr_success(JObj, Context) ->
-    case wh_json:is_json_object(JObj) of
-        'true' -> handle_json_success(JObj, Context);
-        'false' -> handle_thing_success(JObj, Context)
-    end.
-
-handle_thing_success(Thing, Context) ->
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, Thing}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, Thing}
-                  ,{fun cb_context:set_resp_etag/2, 'undefined'}
-                 ]).
-
-handle_json_success([_|_]=JObjs, #cb_context{req_verb = ?HTTP_PUT}=Context) ->
-    RespData = [wh_json:public_fields(JObj)
-                || JObj <- JObjs,
-                   wh_json:is_false(<<"pvt_deleted">>, JObj, 'true')
-               ],
-    RespHeaders = [{<<"Location">>, wh_json:get_value(<<"_id">>, JObj)}
-                   || JObj <- JObjs
-                  ] ++ cb_context:resp_headers(Context),
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, JObjs}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, RespData}
-                  ,{fun cb_context:set_resp_etag/2, rev_to_etag(JObjs)}
-                  ,{fun cb_context:set_resp_headers/2, RespHeaders}
-                 ]);
-handle_json_success([_|_]=JObjs, Context) ->
-    RespData = [wh_json:public_fields(JObj)
-                || JObj <- JObjs,
-                   wh_json:is_false(<<"pvt_deleted">>, JObj, 'true')
-               ],
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, JObjs}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, RespData}
-                  ,{fun cb_context:set_resp_etag/2, rev_to_etag(JObjs)}
-                 ]);
-handle_json_success(JObj, #cb_context{req_verb = ?HTTP_PUT}=Context) ->
-    RespHeaders = [{<<"Location">>, wh_json:get_value(<<"_id">>, JObj)}
-                   | cb_context:resp_headers(Context)
-                  ],
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, JObj}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, wh_json:public_fields(JObj)}
-                  ,{fun cb_context:set_resp_etag/2, rev_to_etag(JObj)}
-                  ,{fun cb_context:set_resp_headers/2, RespHeaders}
-                 ]);
-handle_json_success(JObj, Context) ->
-    lists:foldl(fun fold_over_setters/2
-                ,Context
-                ,[{fun cb_context:set_doc/2, JObj}
-                  ,{fun cb_context:set_resp_status/2, 'success'}
-                  ,{fun cb_context:set_resp_data/2, wh_json:public_fields(JObj)}
-                  ,{fun cb_context:set_resp_etag/2, rev_to_etag(JObj)}
-                 ]).
 
 %%--------------------------------------------------------------------
 %% @private

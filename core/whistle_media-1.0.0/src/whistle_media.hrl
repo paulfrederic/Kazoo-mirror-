@@ -17,5 +17,7 @@
 
 -define(CONFIG_CAT, <<"media_mgr">>).
 
+-define(DEFAULT_STORAGE_ENGINE, <<"bigcouch">>).
+
 -define(WH_MEDIA_HRL, 'true').
 -endif.
