@@ -13,7 +13,8 @@
          ,new_private/1
          ,new_private/2
         ]).
--export([fetch/2
+-export([fetch/1
+         ,fetch/2
          ,fetch/3
         ]).
 -export([fetch_url/1]).
@@ -42,6 +43,7 @@
          ,set_content/2
         ]).
 -export([update/1]).
+-export([prepare_store/1]).
 -export([store/1]).
 -export([store_url/1]).
 -export([delete_content/1
@@ -62,6 +64,7 @@
                    ,filename}).
 
 -type wh_media() :: #wh_media{}.
+-opaque media() :: wh_media().
 
 -include("whistle_media.hrl").
 
@@ -101,23 +104,29 @@ new_private(Account, JObj) ->
               ,engine=get_engine('undefined')
              }.
 
--spec fetch(ne_binary(), ne_binary()) -> wh_media() | {'error', _}.
+-spec fetch(wh_media()) -> wh_media().
+fetch(#wh_media{account_db=Account
+                ,metadata_id=Id}) ->
+    fetch(Account, Id).
+
+-spec fetch(ne_binary(), ne_binary()) -> wh_media().
 fetch(Account, Id) ->
     fetch(Account, Id, 'undefined').
 
--spec fetch(ne_binary(), ne_binary(), api_binary()) -> wh_media() | {'error', _}.    
+-spec fetch(ne_binary(), ne_binary(), api_binary()) -> wh_media().
 fetch(Account, Id, MediaName) ->
-    Media = 
+    Media =
         #wh_media{account_id=wh_util:format_account_id(Account, 'raw')
                   ,account_db=wh_util:format_account_id(Account, 'encoded')
-                  ,metadata_id=Id
                   ,media_name=MediaName
                  },
-    case load_metadata(Media) of
-        {'error', _}=Error -> Error;
+    case load_metadata(Media, Id) of
+        {'error', _} -> Media;
         {'ok', JObj} ->
             Engine = get_engine(JObj),
+            MetadataId = wh_json:get_value(<<"_id">>, JObj),
             Engine:fetch(Media#wh_media{metadata=JObj
+                                        ,metadata_id=MetadataId
                                         ,engine=Engine})
     end.
 
@@ -125,8 +134,6 @@ fetch(Account, Id, MediaName) ->
 fetch_url(#wh_media{engine=Engine}=Media) ->
     Engine:fetch_url(Media).
 
-reload(Media) -> Media.
-     
 -spec account_db(wh_media()) -> api_binary().
 account_db(#wh_media{account_db=AccountDb}) -> AccountDb.
 
@@ -179,7 +186,7 @@ media_name(#wh_media{media_name=MediaName}) -> MediaName.
 set_media_name(MediaName, Media) ->
     Media#wh_media{media_name=MediaName}.
 
--spec filename(wh_media()) -> ne_binary().
+-spec filename(wh_media()) -> api_binary().
 filename(#wh_media{filename='undefined'
                    ,media_name=MediaName}) ->
     MediaName;
@@ -210,7 +217,9 @@ content(#wh_media{content=Content}) -> Content.
 set_content(Content, Media) ->
     Media#wh_media{content=Content}.
 
--spec update(wh_media()) -> wh_media().
+-spec update(wh_media()) -> wh_media() | {'error', _}.
+update(#wh_media{account_db='undefined'}) -> {'error', 'no_media_db'};
+update(#wh_media{metadata_id='undefined'}) -> {'error', 'no_media_id'};
 update(#wh_media{account_db=AccountDb}=Media) ->
     case couch_mgr:save_doc(AccountDb, prepare_metadata(Media)) of
         {'error', _}=Error -> Error;
@@ -219,10 +228,19 @@ update(#wh_media{account_db=AccountDb}=Media) ->
                            ,metadata=JObj}
     end.
 
-prepare_store(Media) -> Media.
-     
+-spec prepare_store(wh_media()) -> wh_media() | {'error', _}.
+prepare_store(#wh_media{account_db='undefined'}) -> {'error', 'no_media_db'};
+prepare_store(#wh_media{metadata_id='undefined'}) -> {'error', 'no_media_id'};
+prepare_store(#wh_media{account_db=AccountDb
+                        ,metadata=Metadata}=Media) ->
+    case couch_mgr:save_doc(AccountDb, wh_json:delete_key(<<"_attachments">>, Metadata)) of
+        {'error', _}=Error -> Error;
+        {'ok', JObj} ->
+            Media#wh_media{metadata_id=wh_json:get_value(<<"_id">>, JObj)
+                           ,metadata=JObj}
+    end.
 
--spec store(wh_media()) -> wh_media().    
+-spec store(wh_media()) -> wh_media().
 store(#wh_media{engine=Engine}=Media) ->
     Engine:store(Media).
 
@@ -234,7 +252,7 @@ store_url(Media) ->
 -spec delete_content(wh_media()) -> wh_media() | {'error', _}.
 delete_content(#wh_media{engine=Engine}=Media) ->
     Engine:delete_content(Media).
-    
+
 -spec delete(wh_media()) -> 'ok' | {'error', _}.
 delete(#wh_media{engine=Engine}=Media) ->
     case Engine:delete(Media) of
@@ -243,16 +261,19 @@ delete(#wh_media{engine=Engine}=Media) ->
     end.
 
 -spec delete_metadata(wh_media()) -> 'ok' | {'error', _}.
-delete_metadata(Media) ->
-    AccountDb = wh_media:account_db(Media),
-    MetadataId = wh_media:metadata_id(Media),
+delete_metadata(#wh_media{account_db='undefined'}) -> 'ok';
+delete_metadata(#wh_media{metadata_id='undefined'}) -> 'ok';
+delete_metadata(#wh_media{account_db=AccountDb
+                          ,metadata_id=MetadataId}) ->
     case couch_mgr:del_doc(AccountDb, MetadataId) of
-        {'error', _}=Error -> Error;        
+        {'error', _}=Error -> Error;
         {'ok', _} -> 'ok'
     end.
 
--spec load_metadata(wh_media()) -> {'ok', wh_json:object()} | {'error', _}.
-load_metadata(#wh_media{account_db=AccountDb, metadata_id=Id}) ->
+-spec load_metadata(wh_media(), api_binary()) -> {'ok', wh_json:object()} | {'error', _}.
+load_metadata(#wh_media{account_db='undefined'}, _) -> {'error', 'no_media_db'};
+load_metadata(_, 'undefined') -> {'error', 'no_media_id'};
+load_metadata(#wh_media{account_db=AccountDb}, Id) ->
     couch_mgr:open_cache_doc(AccountDb, Id).
 
 -spec get_engine(wh_json:object()) -> atom().
@@ -262,4 +283,3 @@ get_engine(JObj) -> 'wh_media_bigcouch'.
 prepare_metadata(#wh_media{metadata=JObj}) ->
     Props = [{<<"pvt_modified">>, wh_util:current_tstamp()}],
     wh_json:set_values(Props, JObj).
-
