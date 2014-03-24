@@ -19,31 +19,63 @@
               }).
 -type file() :: #file{}.
 -type files() :: [files(),...] | [].
+-type request_results() :: 'accepted' | 'not_configured' | 'server_error' | 'connection_error'.
 
 -spec handle_req(wh_json:object(), wh_proplist()) -> 'ok'.
 handle_req(JObj, _Props) ->
     'true' = wapi_notifications:voicemail_v(JObj),
     _ = whapps_util:put_callid(JObj),
-    lager:debug("new voicemail left"),
-    maybe_make_request(JObj).
-
--spec maybe_make_request(wh_json:object()) -> 'ok'.
-maybe_make_request(JObj) ->
-    URL = whapps_config:get_value(?CONFIG_CAT, <<"">>),
-    case wh_util:is_empty(URL) of
-        'true' -> 'ok';
-        'false' -> make_request(JObj, URL)
+    lager:debug("new voicemail left, maybe pushing to remote server"),
+    case maybe_make_request(JObj) of
+        'accepted' -> send_response(JObj);
+        _Else -> 'ok'
     end.
 
--spec make_request(wh_json:object(), ne_binary()) -> ne_binary().
-make_request(JObj, URL) ->
-    Payload = build_request_payload(JObj).
+-spec send_response(wh_json:object()) -> 'ok'.
+send_response(JObj) ->
+    Prop = props:filter_undefined(
+             [{<<"Status">>, <<"completed">>}
+              ,{<<"Msg-ID">>, wh_json:get_value(<<"Msg-ID">>, JObj)}
+              | wh_api:default_headers(?APP_NAME, ?APP_VERSION)
+             ]),
+    RespQ = wh_json:get_value(<<"Server-ID">>, JObj),
+    lager:debug("sending completed update to ~s", [RespQ]),
+    wapi_notifications:publish_notify_update(RespQ, Prop).
 
--spec build_request_payload(wh_json:object()) -> ne_binary().
-build_request_payload(JObj) ->
+-spec maybe_make_request(wh_json:object()) -> request_results().
+maybe_make_request(JObj) ->
+    case whapps_config:get_non_empty(?CONFIG_CAT, <<"url">>, <<"">>) of
+        'undefined' ->
+            lager:debug("no remote voicemail push server configured", []),
+            'not_configured';
+        URL -> make_request(JObj, wh_util:to_list(URL))
+    end.
+
+-spec make_request(wh_json:object(), ne_binary()) -> request_results().
+make_request(JObj, URL) ->
+    Boundary = wh_util:rand_hex_binary(16),
+    Body = build_request_body(JObj, <<"--", Boundary/binary>>),
+    ContentType = wh_util:to_list(<<"multipart/form-data; boundary=", Boundary/binary>>),
+    Headers = [{"Content-Length", integer_to_list(byte_size(Body))}],
+    case httpc:request('post', {URL, Headers, ContentType, Body}, [], []) of
+        {'ok', {{_, 200, "OK"}, _, _}} ->
+            lager:debug("server ~s accepted voicemail", [URL]),
+            'accepted';
+        {'ok', {{_, _Code, _Reason}, _, _Reply}} ->
+            lager:info("server ~s rejected request with ~p ~s: ~p"
+                       ,[URL, _Code, _Reason, _Reply]),
+            'server_error';
+        {'error', _Reason} ->
+            lager:info("unable to reach server ~s: ~p"
+                       ,[URL, _Reason]),
+            'connection_error'
+    end.
+
+-spec build_request_body(wh_json:object(), ne_binary()) -> ne_binary().
+build_request_body(JObj, Boundary) ->
     Props = create_metadata(JObj),
     File = get_voicemail_content(JObj, Props),
-    format_multipart(Props, [File]).
+    format_multipart(Props, File, Boundary).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -51,32 +83,22 @@ build_request_payload(JObj) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec format_multipart(wh_proplist(), files()) -> ne_binary().
-format_multipart(Props, Files) ->
-    Boundary = wh_util:rand_hex_binary(16),
-    Routines = [fun(Payload) -> format_multipart_props(Props, Boundary, Payload) end
-                ,fun(Payload) -> format_multipart_files(Files, Boundary, Payload) end
-               ],
-    lists:foldr(fun(F, P) -> F(P) end, <<>>, Routines).
+-spec format_multipart(wh_proplist(), files(), ne_binary()) -> ne_binary().
+format_multipart(Props, File, Boundary) ->
+    Payload = format_multipart_file(File, Boundary),
+    format_multipart_props(Props, Boundary, Payload).
 
 -spec format_multipart_props(wh_proplist(), ne_binary(), ne_binary()) -> ne_binary().
 format_multipart_props([], _, Payload) -> Payload;
 format_multipart_props([{Key, Value}|Props], Boundary, Payload) ->
-    C = <<(format_multipart_formdata(Key, Value, Boundary))/binary, Payload>>,
-    format_multipart_props(Props, Boundary, C).
+    P = <<(format_multipart_formdata(Key, Value, Boundary))/binary, Payload/binary>>,
+    format_multipart_props(Props, Boundary, P).
 
 -spec format_multipart_formdata(ne_binary(), ne_binary(), ne_binary()) -> ne_binary().
 format_multipart_formdata(Key, Value, Boundary) ->
-    <<"Content-Disposition: form-data; name=\"", Key/binary, "\"\r\n"
-      ,Value/binary, "\r\n"
+    <<"Content-Disposition: form-data; name=\"", Key/binary, "\"\r\n\r\n"
+      ,(wh_util:to_binary(Value))/binary, "\r\n"
       ,Boundary/binary, "\r\n">>.
-
--spec format_multipart_files(files(), ne_binary(), ne_binary()) -> ne_binary().
-format_multipart_files([], Boundary, Payload) -> Payload;
-format_multipart_files([File|Files], Boundary, Payload) ->
-    C = <<(format_multipart_file(File, Boundary))/binary
-          ,Payload>>,
-    format_multipart_files(Files, Boundary, Payload).
 
 -spec format_multipart_file(file(), ne_binary()) -> ne_binary().
 format_multipart_file(#file{key=Key
@@ -85,10 +107,10 @@ format_multipart_file(#file{key=Key
                            ,content=Content
                            }, Boundary) ->
     <<"Content-Disposition: form-data; name=\"", Key/binary, "\"; filename=\"", Filename/binary, "\"\r\n"
-      ,"Content-Type: ", ContentType/binary, "\r\n"
-      ,"Content-Transfer-Encoding: binary\r\n"
+      ,"Content-Type: ", ContentType/binary, "\r\n\""
+      ,"Content-Transfer-Encoding: binary\r\n\r\n"
       ,Content/binary, "\r\n"
-      ,Boundary/binary, "\r\n">>.
+      ,Boundary/binary, "--\r\n\r\n">>.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -100,16 +122,16 @@ format_multipart_file(#file{key=Key
 get_voicemail_content(JObj, Props) ->
     AccountDb = wh_json:get_value(<<"Account-DB">>, JObj),
     VoicemailId = wh_json:get_value(<<"Voicemail-Name">>, JObj),
-    {'ok', JObj} = couch_mgr:open_cache_doc(AccountDb, VoicemailId),
-    [AttachmentId|_] = wh_json:get_keys(<<"_attachments">>, JObj),
+    {'ok', VoicemailJObj} = couch_mgr:open_cache_doc(AccountDb, VoicemailId),
+    [AttachmentId|_] = wh_json:get_keys(<<"_attachments">>, VoicemailJObj),
     ContentType = wh_json:get_value([<<"_attachments">>
-                                    ,AttachmentId
-                                    ,<<"content_type">>
-                                    ], JObj, <<"application/octet-stream">>),
+                                     ,AttachmentId
+                                     ,<<"content_type">>
+                                    ], VoicemailJObj, <<"application/octet-stream">>),
     lager:debug("attempting to fetch ~s/~s attachment id ~s"
                ,[AccountDb, VoicemailId, AttachmentId]),
     {'ok', Content} = couch_mgr:fetch_attachment(AccountDb, VoicemailId, AttachmentId),
-    #file{key = wh_json:get_value(<<"pvt_type">>)
+    #file{key = wh_json:get_value(<<"pvt_type">>, VoicemailJObj)
          ,filename = create_file_name(JObj, Props)
          ,content_type = ContentType
          ,content = Content
@@ -129,11 +151,11 @@ create_metadata(JObj) ->
     UserJObj = maybe_get_user(AccountDb
                              ,wh_json:get_value(<<"owner_id">>, MailboxJObj)),
     props:filter_undefined(
-      [{<<"name">>, <<>>}
+      [{<<"name">>, 'undefined'}
       ,{<<"description">>, <<"voicemail message media">>}
       ,{<<"source_type">>, <<"voicemai">>}
       ,{<<"media_source">>, <<"call">>}
-      ,{<<"media_filename">>, <<>>}
+      ,{<<"media_filename">>, 'undefined'}
       ,{<<"streamable">>, <<"true">>}
       ,{<<"from_user">>, wh_json:get_value(<<"From-User">>, JObj)}
       ,{<<"from_realm">>, wh_json:get_value(<<"From-Realm">>, JObj)}
@@ -176,8 +198,8 @@ create_file_name(JObj, Props) ->
 
 -spec get_caller_id(wh_json:object()) -> ne_binary().
 get_caller_id(JObj) ->
-    case {props:get_value(<<"Caller-ID-Name">>, JObj)
-         ,props:get_value(<<"Caller-ID-Number">>, JObj)}
+    case {wh_json:get_ne_value(<<"Caller-ID-Name">>, JObj)
+         ,wh_json:get_ne_value(<<"Caller-ID-Number">>, JObj)}
     of
         {'undefined', 'undefined'} -> <<"Unknown">>;
         {'undefined', Num} -> wnm_util:pretty_print(wh_util:to_binary(Num));
@@ -191,12 +213,3 @@ get_local_date_time(JObj, Props) ->
     Timezone = wh_util:to_list(props:get_value(<<"timezone">>, Props, <<"UTC">>)),
     ClockTimezone = whapps_config:get_string(<<"servers">>, <<"clock_timezone">>, <<"UTC">>),
     localtime:local_to_local(DateTime, ClockTimezone, Timezone).
-
--spec preaty_print_length('undefined' | integer() | wh_json:object()) -> ne_binary().
-preaty_print_length('undefined') -> <<"00:00">>;
-preaty_print_length(Milliseconds) when is_integer(Milliseconds) ->
-    Seconds = round(Milliseconds / 1000) rem 60,
-    Minutes = trunc(Milliseconds / (1000*60)) rem 60,
-    wh_util:to_binary(io_lib:format("~2..0w:~2..0w", [Minutes, Seconds]));
-preaty_print_length(Event) ->
-    preaty_print_length(wh_json:get_integer_value(<<"Voicemail-Length">>, Event)).

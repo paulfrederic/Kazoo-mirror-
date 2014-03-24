@@ -54,10 +54,8 @@ handle_req(JObj, _Props) ->
 
     case {wh_json:get_ne_value(<<"email">>, UserJObj), wh_json:is_true(<<"vm_to_email_enabled">>, UserJObj)} of
         {'undefined', _} ->
-            notify_util:send_update(RespQ, MsgId, <<"failed">>, <<"not configured">>),
             lager:debug("no email found for user ~s", [wh_json:get_value(<<"username">>, UserJObj)]);
         {_Email, 'false'} ->
-            notify_util:send_update(RespQ, MsgId, <<"failed">>, <<"not configured">>),
             lager:debug("voicemail to email disabled for ~s", [_Email]);
         {Email, 'true'} ->
             lager:debug("VM->Email enabled for user, sending to ~s", [Email]),
@@ -202,7 +200,7 @@ build_and_send_email(TxtBody, HTMLBody, Subject, To, Props, {RespQ, MsgId}) ->
             },
     case notify_util:send_email(From, To, Email) of
         'ok' -> notify_util:send_update(RespQ, MsgId, <<"completed">>);
-        {'error', Reason} -> notify_util:send_update(RespQ, MsgId, <<"failed">>, Reason)
+        {'error', _} -> 'ok'
     end.
 
 %%--------------------------------------------------------------------
