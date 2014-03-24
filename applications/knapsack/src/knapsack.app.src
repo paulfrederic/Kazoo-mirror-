@@ -1,0 +1,13 @@
+{application, knapsack,
+ [
+  {description, "Knapsack - a temporary shim until this can be moved the wh_media"},
+  {vsn, "0.0.1"},
+  {modules, []},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { knapsack_app, []}},
+  {env, []}
+ ]}.
