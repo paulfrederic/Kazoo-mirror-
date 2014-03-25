@@ -53,10 +53,69 @@ maybe_make_request(JObj) ->
 
 -spec make_request(wh_json:object(), ne_binary()) -> request_results().
 make_request(JObj, URL) ->
+    %% support json or form-data
+    case whapps_config:get_non_empty(?CONFIG_CAT, <<"payload">>, <<"json">>) of
+        <<"form-data">> -> make_form_data_request(JObj, URL);
+        <<"json">> -> make_json_request(JObj, URL)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec make_json_request(wh_json:object(), ne_binary()) -> request_results().
+make_json_request(JObj, URL) ->
+    Body = build_json_body(JObj),
+    ContentType = wh_util:to_list(<<"application/json">>),
+    Headers = [{"Content-Length", integer_to_list(byte_size(Body))}],
+    io:format("~p ~p ~p~n", [ContentType, Headers, Body]),
+    make_request(URL, Headers, ContentType, Body).
+
+-spec build_json_body(wh_json:object()) -> ne_binary().
+build_json_body(JObj) ->
+    Props = create_metadata(JObj),
+    #file{filename=Filename
+          ,content_type=ContentType
+          ,content=Content
+         } = get_voicemail_content(JObj, Props),
+    wh_json:encode(
+      wh_json:from_list([{<<"name">>, Filename}
+                         ,{<<"content_type">>, ContentType}
+                         ,{<<"content">>, base64:encode(Content)}
+                         | Props
+                        ])
+     ).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec make_form_data_request(wh_json:object(), ne_binary()) -> request_results().
+make_form_data_request(JObj, URL) ->
     Boundary = wh_util:rand_hex_binary(16),
-    Body = build_request_body(JObj, <<"--", Boundary/binary>>),
+    Body = build_multipart_body(JObj, <<"--", Boundary/binary>>),
     ContentType = wh_util:to_list(<<"multipart/form-data; boundary=", Boundary/binary>>),
     Headers = [{"Content-Length", integer_to_list(byte_size(Body))}],
+    make_request(URL, Headers, ContentType, Body).
+
+-spec build_multipart_body(wh_json:object(), ne_binary()) -> ne_binary().
+build_multipart_body(JObj, Boundary) ->
+    Props = create_metadata(JObj),
+    File = get_voicemail_content(JObj, Props),
+    format_multipart(Props, File, Boundary).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec make_request(string(), wh_proplist(), ne_binary(), ne_binary()) -> request_results().
+make_request(URL, Headers, ContentType, Body) ->
     case httpc:request('post', {URL, Headers, ContentType, Body}, [], []) of
         {'ok', {{_, 200, "OK"}, _, _}} ->
             lager:debug("server ~s accepted voicemail", [URL]),
@@ -70,12 +129,6 @@ make_request(JObj, URL) ->
                        ,[URL, _Reason]),
             'connection_error'
     end.
-
--spec build_request_body(wh_json:object(), ne_binary()) -> ne_binary().
-build_request_body(JObj, Boundary) ->
-    Props = create_metadata(JObj),
-    File = get_voicemail_content(JObj, Props),
-    format_multipart(Props, File, Boundary).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -151,8 +204,7 @@ create_metadata(JObj) ->
     UserJObj = maybe_get_user(AccountDb
                              ,wh_json:get_value(<<"owner_id">>, MailboxJObj)),
     props:filter_undefined(
-      [{<<"name">>, 'undefined'}
-      ,{<<"description">>, <<"voicemail message media">>}
+      [{<<"description">>, <<"voicemail message media">>}
       ,{<<"source_type">>, <<"voicemai">>}
       ,{<<"media_source">>, <<"call">>}
       ,{<<"media_filename">>, 'undefined'}
