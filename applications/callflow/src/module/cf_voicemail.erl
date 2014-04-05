@@ -109,6 +109,8 @@
           ,max_message_count = 0 :: non_neg_integer()
           ,max_message_length :: pos_integer()
           ,min_message_length :: pos_integer()
+          ,max_message_size = 5242880 :: pos_integer()
+          ,min_message_size = 500 :: pos_integer()
           ,keys = #keys{} :: vm_keys()
           ,transcribe_voicemail = 'false' :: boolean()
           ,notifications :: wh_json:object()
@@ -700,11 +702,7 @@ config_menu(#mailbox{keys=#keys{rec_unavailable=RecUnavailable
 %%--------------------------------------------------------------------
 -spec record_unavailable_greeting(mailbox(), whapps_call:call(), ne_binary()) ->
                                          'ok' | mailbox().
-record_unavailable_greeting(#mailbox{unavailable_media='undefined'}=Box, Call, AttachmentName) ->
-    Media = new_media(Box, Call, <<"unavailable greeting">>),
-    record_unavailable_greeting(Box#mailbox{unavailable_media=Media}, Call, AttachmentName);
-
-record_unavailable_greeting(#mailbox{unavailable_media=Media}=Box, Call, AttachmentName) ->
+record_unavailable_greeting(Box, Call, AttachmentName) ->
     lager:info("recording unavailable greeting  as ~s", [AttachmentName]),
     Tone = wh_json:from_list([{<<"Frequencies">>, [<<"440">>]}
                               ,{<<"Duration-ON">>, <<"500">>}
@@ -718,16 +716,28 @@ record_unavailable_greeting(#mailbox{unavailable_media=Media}=Box, Call, Attachm
         {'ok', 'record'} ->
             record_unavailable_greeting(Box, Call, tmp_file());
         {'ok', 'save'} ->
-            %% TODO: how to get media id?
-            _ = store_recording(Box, Call, AttachmentName, Media),
-            MediaId = wh_media:metadata_id(Media),
-            'ok' = update_doc([<<"media">>, <<"unavailable">>], MediaId, Box, Call),
-            _ = whapps_call_command:b_prompt(<<"vm-saved">>, Call),
-            Box;
+            store_unavailable_greeting(Box, Call, AttachmentName);
         {'ok', 'no_selection'} ->
             _ = whapps_call_command:b_prompt(<<"vm-deleted">>, Call),
             'ok';
         {'branch', _}=B -> B
+    end.
+
+-spec store_unavailable_greeting(mailbox(), whapps_call:call(), ne_binary()) -> 'ok' | mailbox().
+store_unavailable_greeting(#mailbox{unavailable_media='undefined'}=Box, Call, AttachmentName) ->
+    Media = new_media(Box, Call, <<"unavailable greeting">>),
+    store_unavailable_greeting(Box#mailbox{unavailable_media=Media}, Call, AttachmentName);
+store_unavailable_greeting(#mailbox{unavailable_media=Media}=Box, Call, AttachmentName) ->
+    %% TODO: how to get media id?
+    case store_recording(Box, Call, AttachmentName, Media) of
+        {'error', UnavailableMedia} ->
+            wh_media:delete(UnavailableMedia),
+            Box#mailbox{unavailable_media='undefined'};
+        {'ok', UnavailableMedia} ->
+            MediaId = wh_media:metadata_id(UnavailableMedia),
+            'ok' = update_doc([<<"media">>, <<"unavailable">>], MediaId, Box, Call),
+            _ = whapps_call_command:b_prompt(<<"vm-saved">>, Call),
+            Box#mailbox{unavailable_media=UnavailableMedia}
     end.
 
 %%--------------------------------------------------------------------
@@ -738,9 +748,6 @@ record_unavailable_greeting(#mailbox{unavailable_media=Media}=Box, Call, Attachm
 %%--------------------------------------------------------------------
 -spec record_name(mailbox(), whapps_call:call(), ne_binary()) ->
                          'ok' | mailbox().
-record_name(#mailbox{name_media='undefined'}=Box, Call, AttachmentName) ->
-    Media = new_media(Box, Call, <<"users name">>),
-    record_name(Box#mailbox{name_media=Media}, Call, AttachmentName);
 record_name(#mailbox{owner_id='undefined'
                      ,mailbox_id=MailboxId
                     }=Box, Call, AttachmentName) ->
@@ -752,7 +759,7 @@ record_name(#mailbox{owner_id=OwnerId}=Box, Call, AttachmentName) ->
 
 -spec record_name(mailbox(), whapps_call:call(), ne_binary(), ne_binary()) ->
                          'ok' | mailbox().
-record_name(#mailbox{name_media=Media}=Box, Call, AttachmentName, DocId) ->
+record_name(Box, Call, AttachmentName, DocId) ->
     lager:info("recording name as ~s", [AttachmentName]),
     Tone = wh_json:from_list([{<<"Frequencies">>, [<<"440">>]}
                               ,{<<"Duration-ON">>, <<"500">>}
@@ -766,16 +773,28 @@ record_name(#mailbox{name_media=Media}=Box, Call, AttachmentName, DocId) ->
         {'ok', 'record'} ->
             record_name(Box, Call, tmp_file());
         {'ok', 'save'} ->
-            %% TODO: how to get media id?
-            _ = store_recording(Box, Call, AttachmentName, Media),
-            MediaId = wh_media:metadata_id(Media),
-            'ok' = update_doc(?RECORDED_NAME_KEY, MediaId, DocId, Call),
-            _ = whapps_call_command:b_prompt(<<"vm-saved">>, Call),
-            Box;
+            store_name(Box, Call, AttachmentName, DocId);
         {'ok', 'no_selection'} ->
             _ = whapps_call_command:b_prompt(<<"vm-deleted">>, Call),
             'ok';
         {'branch', _}=B -> B
+    end.
+
+-spec store_name(mailbox(), whapps_call:call(), ne_binary(), ne_binary()) -> 'ok' | mailbox().
+store_name(#mailbox{name_media='undefined'}=Box, Call, AttachmentName, DocId) ->
+    Media = new_media(Box, Call, <<"users name">>),
+    store_name(Box#mailbox{name_media=Media}, Call, AttachmentName, DocId);
+store_name(#mailbox{name_media=Media}=Box, Call, AttachmentName, DocId) ->
+    %% TODO: how to get media id?
+    case store_recording(Box, Call, AttachmentName, Media) of
+        {'error', NameMedia} ->
+            wh_media:delete(NameMedia),
+            Box#mailbox{name_media='undefined'};
+        {'ok', NameMedia} ->
+            MediaId = wh_media:metadata_id(NameMedia),
+            'ok' = update_doc(?RECORDED_NAME_KEY, MediaId, DocId, Call),
+            _ = whapps_call_command:b_prompt(<<"vm-saved">>, Call),
+            Box#mailbox{name_media=NameMedia}
     end.
 
 %%--------------------------------------------------------------------
@@ -844,10 +863,9 @@ collect_pin(Interdigit, Call, NoopId) ->
 -spec new_message(mailbox(), whapps_call:call(), ne_binary(), pos_integer()) -> any().
 new_message(Box, Call, AttachmentName, Length) ->
     lager:debug("saving new ~bms voicemail message and metadata", [Length]),
-    Media = new_media(Box, Call, <<"message">>),
-    case store_recording(Box, Call, AttachmentName, Media) of
-        'true' -> update_mailbox(Box, Call, Media, Length);
-        'false' -> wh_media:delete(Media)
+    case store_recording(Box, Call, AttachmentName, new_media(Box, Call, <<"message">>)) of
+        {'ok', Media} -> update_mailbox(Box, Call, Media, Length);
+        {'error', Media} -> wh_media:delete(Media)
     end.
 
 -spec update_mailbox(mailbox(), whapps_call:call(), ne_binary(), integer()) ->
@@ -1073,6 +1091,8 @@ build_mailbox_profile(Data, Call, JObj) ->
              ,is_owner = is_owner(Call, OwnerId)
              ,max_message_count = max_message_count(Call)
              ,max_message_length = max_message_length([Data, JObj])
+             ,min_message_size = min_message_size(Call)
+             ,max_message_size = max_message_size(Call)             
              ,message_count = message_count(JObj)
              ,interdigit_timeout = interdigit_timeout([JObj, Data])
              ,keys = populate_keys(Call)
@@ -1177,6 +1197,28 @@ max_message_length(JObjs) ->
         MaxMessageLength -> wh_util:to_integer(MaxMessageLength)
     end.
 
+-spec min_message_size(whapps_call:call()) -> non_neg_integer().
+min_message_size(Call) ->
+    case whapps_account_config:get(whapps_call:account_id(Call)
+                                   ,?CF_CONFIG_CAT
+                                   ,[<<"voicemail">>, <<"min_message_size">>]
+                                  )
+    of
+        'undefined' -> ?MAILBOX_DEFAULT_MSG_MIN_SIZE;
+        MML -> wh_util:to_integer(MML)
+    end.
+
+-spec max_message_size(whapps_call:call()) -> non_neg_integer().
+max_message_size(Call) ->
+    case whapps_account_config:get(whapps_call:account_id(Call)
+                                   ,?CF_CONFIG_CAT
+                                   ,[<<"voicemail">>, <<"max_message_size">>]
+                                  )
+    of
+        'undefined' -> ?MAILBOX_DEFAULT_MSG_MAX_SIZE;
+        MML -> wh_util:to_integer(MML)
+    end.
+
 -spec interdigit_timeout(wh_json:objects()) -> non_neg_integer().
 interdigit_timeout(JObjs) ->
     case wh_json:find(<<"interdigit_timeout">>, JObjs) of
@@ -1246,38 +1288,28 @@ review_recording(#mailbox{keys=#keys{listen=Listen
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec store_recording(mailbox(), whapps_call:call(), ne_binary(), wh_media:media()) -> boolean().
+-spec store_recording(mailbox(), whapps_call:call(), ne_binary(), wh_media:media()) -> {'ok' | 'error' | wh_media:media()}.
 store_recording(Box, Call, AttachmentName, Media) ->
     lager:debug("storing recording ~s", [AttachmentName]),
     URL = wh_media:store_url(wh_media:prepare_store(Media)),
     _ = whapps_call_command:b_store(AttachmentName, URL, Call),
-    verify_store_recording(wh_media:fetch(Media), Call).
+    verify_store_recording(Box, wh_media:fetch(Media)).
 
--spec verify_store_recording(wh_media:media(), whapps_call:call()) -> boolean().
-verify_store_recording(Media, Call) ->
-    MinLength =
-        case whapps_account_config:get(whapps_call:account_id(Call)
-                                       ,?CF_CONFIG_CAT
-                                       ,[<<"voicemail">>, <<"min_message_size">>]
-                                      )
-        of
-            'undefined' -> ?MAILBOX_DEFAULT_MSG_MIN_SIZE;
-            MML -> wh_util:to_integer(MML)
-        end,
+-spec verify_store_recording(mailbox(), wh_media:media()) -> {'ok' | 'error' | wh_media:media()}.
+verify_store_recording(#mailbox{min_message_size=MinSize
+                                ,max_message_size=MaxSize
+                               }, Media) ->
     ContentLength = wh_media:content_length(Media),
-    case ContentLength >= MinLength of
-        'true' -> 'true';
+    case ContentLength >= MinSize 
+        andalso ContentLength =< MaxSize
+    of
+        'true' -> {'ok', Media};
         'false' ->
-            lager:info("attachment length is ~B and must be larger than ~B to be stored"
-                       ,[ContentLength, MinLength]),
-            'false'
+            lager:info("attachment length is ~B but must be between ~B and ~B to be stored"
+                       ,[ContentLength, MinSize, MaxSize]),
+            {'error', Media}
     end.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 %% @private
 %% @doc

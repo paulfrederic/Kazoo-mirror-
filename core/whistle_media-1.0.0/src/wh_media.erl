@@ -221,7 +221,7 @@ set_content(Content, Media) ->
 update(#wh_media{account_db='undefined'}) -> {'error', 'no_media_db'};
 update(#wh_media{metadata_id='undefined'}) -> {'error', 'no_media_id'};
 update(#wh_media{account_db=AccountDb}=Media) ->
-    case couch_mgr:save_doc(AccountDb, prepare_metadata(Media)) of
+    case couch_mgr:save_doc(AccountDb, prepare_metadata(Media, 'false')) of
         {'error', _}=Error -> Error;
         {'ok', JObj} ->
             Media#wh_media{metadata_id=wh_json:get_value(<<"_id">>, JObj)
@@ -230,10 +230,8 @@ update(#wh_media{account_db=AccountDb}=Media) ->
 
 -spec prepare_store(wh_media()) -> wh_media() | {'error', _}.
 prepare_store(#wh_media{account_db='undefined'}) -> {'error', 'no_media_db'};
-prepare_store(#wh_media{metadata_id='undefined'}) -> {'error', 'no_media_id'};
-prepare_store(#wh_media{account_db=AccountDb
-                        ,metadata=Metadata}=Media) ->
-    case couch_mgr:save_doc(AccountDb, wh_json:delete_key(<<"_attachments">>, Metadata)) of
+prepare_store(#wh_media{account_db=AccountDb}=Media) ->
+    case couch_mgr:save_doc(AccountDb, prepare_metadata(Media, 'true')) of
         {'error', _}=Error -> Error;
         {'ok', JObj} ->
             Media#wh_media{metadata_id=wh_json:get_value(<<"_id">>, JObj)
@@ -245,9 +243,9 @@ store(#wh_media{engine=Engine}=Media) ->
     Engine:store(Media).
 
 -spec store_url(wh_media()) -> ne_binary().
-store_url(Media) ->
+store_url(#wh_media{engine=Engine}=Media) ->
     %% TODO: verify that metadata is present...
-    <<>>.
+    Engine:store_url(Media).
 
 -spec delete_content(wh_media()) -> wh_media() | {'error', _}.
 delete_content(#wh_media{engine=Engine}=Media) ->
@@ -279,7 +277,12 @@ load_metadata(#wh_media{account_db=AccountDb}, Id) ->
 -spec get_engine(wh_json:object()) -> atom().
 get_engine(JObj) -> 'wh_media_bigcouch'.
 
--spec prepare_metadata(wh_media()) -> wh_json:object().
-prepare_metadata(#wh_media{metadata=JObj}) ->
+-spec prepare_metadata(wh_media(), boolean()) -> wh_json:object().
+prepare_metadata(#wh_media{metadata=JObj}, StripAttachments) ->
+    prepare_metadata(JObj, StripAttachments);
+prepare_metadata(JObj, 'true') ->
+    J = wh_json:delete_key(<<"_attachments">>, JObj),
+    prepare_metadata(J, 'false');
+prepare_metadata(JObj, 'false') ->
     Props = [{<<"pvt_modified">>, wh_util:current_tstamp()}],
     wh_json:set_values(Props, JObj).

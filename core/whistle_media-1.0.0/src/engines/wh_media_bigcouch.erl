@@ -12,6 +12,7 @@
 -export([fetch_url/1]).
 -export([content/1]).
 -export([store/1]).
+-export([store_url/1]).
 -export([delete_content/1]).
 -export([delete/1]).
 
@@ -111,6 +112,16 @@ store(Media) ->
         {'error', _}=Error -> Error;
         {'ok', _} -> cleanup(Media)
     end.
+
+%%--------------------------------------------------------------------
+%% @public
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec store_url(wh_media:media()) -> ne_binary().
+store_url(Media) -> 
+    <<>>.
 
 %%--------------------------------------------------------------------
 %% @public
