@@ -187,7 +187,9 @@ maybe_start_plaintext(Dispatch) ->
                                    ]
                                  ) of
                 {'ok', _} ->
-                    lager:info("started plaintext API server")
+                    lager:info("started plaintext API server");
+                {'error', {'already_started', _Pid}} ->
+                    lager:info("plaintext API server running at ~p", [_Pid])
             catch
                 _E:_R ->
                     lager:warning("crashed starting API server: ~s: ~p", [_E, _R])
