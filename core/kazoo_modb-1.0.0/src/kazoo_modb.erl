@@ -14,7 +14,9 @@
 -export([open_doc/2, open_doc/3, open_doc/4]).
 -export([save_doc/2, save_doc/3, save_doc/4]).
 -export([get_modb/1, get_modb/2, get_modb/3]).
--export([maybe_archive_modb/1]).
+-export([maybe_archive_modb/1
+         ,archive_modb/1
+        ]).
 -export([refresh_views/1]).
 
 %%--------------------------------------------------------------------
@@ -241,14 +243,19 @@ create_routines(AccountMODb) ->
         ,Routines
     ).
 
+%%--------------------------------------------------------------------
+%% @public
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
 -spec maybe_archive_modb(ne_binary()) -> 'ok'.
 maybe_archive_modb(AccountMODb) ->
     {Year, Month, _} = erlang:date(),
-
     case should_archive(AccountMODb, Year, Month) of
         'true' ->
             lager:info("account modb ~s needs archiving", [AccountMODb]),
-            'ok' = archive_modb(AccountMODb),
+            'ok' = couch_util:archive(AccountMODb),
             lager:info("account modb ~s archived, removing the db", [AccountMODb]),
             Rm = couch_mgr:db_delete(AccountMODb),
             lager:info("account modb ~s deleted: ~p", [AccountMODb, Rm]);
@@ -268,61 +275,4 @@ should_archive(AccountMODb, Year, Month) ->
 
 -spec archive_modb(ne_binary()) -> 'ok'.
 archive_modb(AccountMODb) ->
-    {'ok', DbInfo} = couch_mgr:db_info(AccountMODb),
-
-    MaxDocs = whapps_config:get_integer(?CONFIG_CAT, <<"max_concurrent_docs_to_archive">>, 500),
-    Filename = filename:join(["/tmp", <<AccountMODb/binary, ".archive.json">>]),
-    {'ok', File} = file:open(Filename, ['write']),
-
-    lager:debug("archiving to ~s", [Filename]),
-    archive_modb(AccountMODb, File, MaxDocs, wh_json:get_integer_value(<<"doc_count">>, DbInfo), 0),
-    file:close(File).
-
-%% MaxDocs = The biggest set of docs to pull from Couch
-%% N = The number of docs in the DB that haven't been archived
-%% Pos = Which doc will the next query start from (the offset)
--spec archive_modb(ne_binary(), file:io_device(), pos_integer(), non_neg_integer(), non_neg_integer()) -> 'ok'.
-archive_modb(AccountMODb, _File,  _MaxDocs, 0, _Pos) ->
-    lager:debug("account modb ~s done with exportation", [AccountMODb]);
-archive_modb(AccountMODb, File, MaxDocs, N, Pos) when N =< MaxDocs ->
-    lager:debug("fetching next ~b docs", [N]),
-    ViewOptions = [{'limit', N}
-                   ,{'skip', Pos}
-                   ,'include_docs'
-                  ],
-    case couch_mgr:all_docs(AccountMODb, ViewOptions) of
-        {'ok', []} -> lager:debug("no docs left after pos ~p, done", [Pos]);
-        {'ok', Docs} ->
-            'ok' = archive_modb_docs(File, Docs),
-            lager:debug("archived ~p docs, done here", [N]);
-        {'error', _E} ->
-            lager:debug("error ~p asking for ~p docs from pos ~p", [_E, N, Pos]),
-            timer:sleep(500),
-            archive_modb(AccountMODb, File, MaxDocs, N, Pos)
-    end;
-archive_modb(AccountMODb, File, MaxDocs, N, Pos) ->
-    lager:debug("fetching next ~b docs", [MaxDocs]),
-    ViewOptions = [{'limit', MaxDocs}
-                   ,{'skip', Pos}
-                   ,'include_docs'
-                  ],
-    case couch_mgr:all_docs(AccountMODb, ViewOptions) of
-        {'ok', []} -> lager:debug("no docs left after pos ~p, done", [Pos]);
-        {'ok', Docs} ->
-            'ok' = archive_modb_docs(File, Docs),
-            lager:debug("archived ~p docs", [MaxDocs]),
-            archive_modb(AccountMODb, File, MaxDocs, N - MaxDocs, Pos + MaxDocs);
-        {'error', _E} ->
-            lager:debug("error ~p asking for ~p docs from pos ~p", [_E, N, Pos]),
-            timer:sleep(500),
-            archive_modb(AccountMODb, File, MaxDocs, N, Pos)
-    end.
-
--spec archive_modb_docs(file:io_device(), wh_json:objects()) -> 'ok'.
-archive_modb_docs(File, Docs) ->
-    [archive_modb_doc(File, wh_json:get_value(<<"doc">>, D)) || D <- Docs],
-    'ok'.
-
--spec archive_modb_doc(file:io_device(), wh_json:object()) -> 'ok'.
-archive_modb_doc(File, Doc) ->
-    'ok' = file:write(File, [wh_json:encode(Doc), $\n]).
+    'ok' = couch_util:archive(AccountMODb).
