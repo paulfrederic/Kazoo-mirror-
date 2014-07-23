@@ -19,10 +19,9 @@
                       ecallmgr_util:send_cmd_ret() |
                       [ecallmgr_util:send_cmd_ret(),...].
 exec_cmd(Node, UUID, JObj, ControlPID) ->
-    DestID = wh_json:get_value(<<"Call-ID">>, JObj),
     App = wh_json:get_value(<<"Application-Name">>, JObj),
-    case DestID =:= UUID of
-        'true' ->
+    case wh_json:get_value(<<"Call-ID">>, JObj) of
+        UUID ->
             case get_fs_app(Node, UUID, JObj, App) of
                 {'error', Msg} -> throw({'msg', Msg});
                 {'return', Result} -> Result;
@@ -35,8 +34,8 @@ exec_cmd(Node, UUID, JObj, ControlPID) ->
                 [_|_]=Apps ->
                     [ecallmgr_util:send_cmd(Node, UUID, AppName, AppData) || {AppName, AppData} <- Apps]
             end;
-        'false' ->
-            lager:debug("command ~s not meant for us but for ~s", [wh_json:get_value(<<"Application-Name">>, JObj), DestID]),
+        DestId ->
+            lager:debug("command ~s not meant for us but for ~s", [wh_json:get_value(<<"Application-Name">>, JObj), DestId]),
             throw(<<"call command provided with a command for a different call id">>)
     end.
 
@@ -492,9 +491,11 @@ get_fs_app(Node, UUID, JObj, <<"set">>) ->
         'false' -> {'error', <<"set failed to execute as JObj did not validate">>};
         'true' ->
             ChannelVars = wh_json:to_proplist(wh_json:get_value(<<"Custom-Channel-Vars">>, JObj, wh_json:new())),
+            lager:debug("setting ~p", [ChannelVars]),
             _ = ecallmgr_util:set(Node, UUID, ChannelVars),
 
             CallVars = wh_json:to_proplist(wh_json:get_value(<<"Custom-Call-Vars">>, JObj, wh_json:new())),
+            lager:debug("exporting ~p", [CallVars]),
             _ = ecallmgr_util:export(Node, UUID, CallVars),
 
             {<<"set">>, 'noop'}
