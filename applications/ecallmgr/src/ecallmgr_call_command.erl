@@ -592,9 +592,9 @@ call_pickup(Node, UUID, JObj) ->
     end.
 
 -spec prepare_app(atom(), ne_binary(), wh_json:object() ) ->
-    {ne_binary(), ne_binary()} |
-    {'return', ne_binary()} |
-    {'error', ne_binary()}.
+                         {ne_binary(), ne_binary()} |
+                         {'return', ne_binary()} |
+                         {'error', ne_binary()}.
 prepare_app(Node, UUID, JObj) ->
     Target = wh_json:get_value(<<"Target-Call-ID">>, JObj),
 
